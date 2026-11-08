@@ -1,0 +1,8 @@
+services:
+  jellyfin-recommender:
+    build: .
+    container_name: jellyfin-recommender
+    ports:
+      # http://localhost:8080 — add this origin to the CORS hosts of your Jellyfin server
+      - "8080:80"
+    restart: unless-stopped

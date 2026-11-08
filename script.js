@@ -17,6 +17,15 @@ let recommendationsShowed = 0;
 
 const noImage = "https://placehold.co/200x280/808080/FFFFFF?text=No+Image"
 
+// --- Filter state: Movies/Shows toggle and Watched only/Whole library scope (persisted) ---
+const filterBar = document.getElementById('filter-bar');
+const filterState = {
+  type: localStorage.getItem('recommender.type') || 'Movie',
+  scope: localStorage.getItem('recommender.scope') || 'watched'
+};
+if (!RECOMMENDABLE_TYPES.includes(filterState.type)) filterState.type = 'Movie';
+if (!['watched', 'all'].includes(filterState.scope)) filterState.scope = 'watched';
+
 // Function to generate Jellyfin Content detail URL
 function makeContentUrl(id) {
   // Safely construct URL, assuming jellyfin object is available and has Server properties
@@ -35,7 +44,8 @@ function createBecauseYouWatchedContainer(Content) {
 
   const title = document.createElement('h2');
   title.classList.add('because-you-watched-title');
-  title.textContent = 'Because you watched '; // Base text
+  // In "Whole library" scope the anchors are not necessarily watched
+  title.textContent = filterState.scope === 'all' ? 'Similar to ' : 'Because you watched ';
 
   // Make an "a" link to the Content, using makeContentUrl function and append to the title element
   const ContentLink = document.createElement('a');
@@ -157,7 +167,7 @@ function createBasedOnTastesContainer(recommendations) {
   if(tasteRecommendationsContainer.childElementCount == 0) {
     const title = document.createElement('h2');
     title.classList.add('because-you-watched-title');
-    title.textContent = 'Based on Your General Watched Content';
+    title.textContent = filterState.scope === 'all' ? 'Based on Your Whole Library' : 'Based on Your General Watched Content';
     tasteRecommendationsContainer.appendChild(title);
 
     ContentGrid = document.createElement('div');
@@ -188,6 +198,22 @@ function createBasedOnTastesContainer(recommendations) {
 
 function displayBasedOnYourTastes(recommendations) {
   createBasedOnTastesContainer(recommendations);
+}
+
+// Removes only the recommendation sections: the filter bar and the taste container element stay in place
+function clearRecommendationSections() {
+  recommendationsContainer
+    .querySelectorAll('.because-you-watched-container:not(#taste-recommendations-container), .no-results-message, .loading-message')
+    .forEach(el => el.remove());
+  document.getElementById('taste-recommendations-container').innerHTML = '';
+}
+
+function showRecommendationsMessage(text) {
+  clearRecommendationSections();
+  const message = document.createElement('div');
+  message.className = 'no-results-message';
+  message.textContent = text;
+  recommendationsContainer.appendChild(message);
 }
 
 // Jellyfin Initialization and Login Logic
@@ -244,6 +270,7 @@ function InitializeJellyfin(explicitLogin = false) {
       jellyfinloginActionBtn.removeAttribute('inactive');
       if (jellyfinLogoutBtn) jellyfinLogoutBtn.hidden = false;
       document.getElementById("loginBtn").setAttribute('logged-in', 'true');
+      if (filterBar) { filterBar.hidden = false; syncToggleButtons(); }
       // Clear any previous error messages
       document.getElementById('loginErrorMessage').innerText = "";
       // Trigger library load after successful login
@@ -378,17 +405,20 @@ const getList = async (Library, PlayStatus) => {
   if (PlayStatus === 'Played') {
     window.jellyfin.searchParams.PlayedOnly = true;
     window.jellyfin.searchParams.UnplayedOnly = false;
-  } else { // Unplayed or All (if PlayStatus is null/undefined)
+  } else if (PlayStatus === 'Unplayed') {
     window.jellyfin.searchParams.PlayedOnly = false;
     window.jellyfin.searchParams.UnplayedOnly = true;
+  } else { // 'All': the whole library, regardless of play status
+    window.jellyfin.searchParams.PlayedOnly = false;
+    window.jellyfin.searchParams.UnplayedOnly = false;
   }
 
   try {
     const items = await window.jellyfin.searchItems('', '', {});
     // The Jellyfin.js searchItems function returns a promise that resolves with the item list.
-    // Only these types are recommended. They are filtered here and not at load time: the library cache is shared
-    // with CoverMaker, and loading fewer types there would make each app reload the other's cache on every visit.
-    return (items || []).filter(item => !item?.Type || RECOMMENDABLE_TYPES.includes(item.Type)); // Ensure we always return an array
+    // The Movies/Shows toggle is applied here and not at load time: the library cache is shared with CoverMaker,
+    // and loading fewer types there would make each app reload the other's cache on every visit.
+    return filterByContentType(items, filterState.type); // Ensure we always return an array
   } catch (error) {
     console.error(`Error fetching ${PlayStatus || 'all'} items from library '${Library}':`, error);
     return []; // Return empty array on error
@@ -401,25 +431,44 @@ const getPlayed = async Library => {
 const getUnplayed = async Library => {
   return getList(Library, 'Unplayed');
 }
+const getAll = async Library => {
+  return getList(Library, 'All');
+}
+
+// The two lists the recommender works with, according to the scope toggle:
+// "watched" = played items as anchors, unplayed as candidates (never re-recommends what was watched);
+// "all" = the whole library as both anchors and candidates
+const getScopeLists = async () => {
+  if (filterState.scope === 'all') {
+    window.allItems ??= await getAll();
+    window.Played = window.allItems;
+    window.Unplayed = window.allItems;
+    window.watched = window.allItems;
+    window.unwatched = window.allItems;
+    return { base: window.allItems, candidates: window.allItems, includePlayed: true };
+  }
+  window.Played ??= await getPlayed();
+  window.Unplayed ??= await getUnplayed();
+  window.watched = window.Played;
+  window.unwatched = window.Unplayed;
+  return { base: window.Played, candidates: window.Unplayed, includePlayed: false };
+};
 
 // Main function to get suggestions using findSimilar
 const getSugestions = async (numberOfRandomWatchedContents = 10, numberOfSimilarContentsPerWatched = 7, useSingleAppearance = true) => {
   try {
-    const watchedContents = window.watched || (await getPlayed());
-    window.Played = watchedContents;
+    const { base: watchedContents, candidates: unwatchedContents, includePlayed } = await getScopeLists();
 
-    const unwatchedContents = window.unwatched || (await getUnplayed());
-    window.Unplayed = unwatchedContents;
-  
     if (!watchedContents || watchedContents.length === 0) {
-        console.warn("No watched Contents found. Cannot generate recommendations based on history.");
-        // Optionally, fall back to a general popular Contents list or a default set.
-        recommendationsContainer.innerHTML = '<div class="no-results-message">Watch some Contents to get recommendations!</div>';
+        console.warn("No base Contents found. Cannot generate recommendations.");
+        showRecommendationsMessage(filterState.scope === 'all'
+          ? 'The library has no Contents of this type.'
+          : 'Watch some Contents to get recommendations!');
         return [];
     }
     if (!unwatchedContents || unwatchedContents.length === 0) {
-        console.warn("No unwatched Contents found. Cannot generate recommendations.");
-        recommendationsContainer.innerHTML = '<div class="no-results-message">No unwatched Contents available.</div>';
+        console.warn("No candidate Contents found. Cannot generate recommendations.");
+        showRecommendationsMessage('No unwatched Contents available.');
         return [];
     }
 
@@ -429,7 +478,7 @@ const getSugestions = async (numberOfRandomWatchedContents = 10, numberOfSimilar
         return [];
     }
 
-    const recommendations = findSimilar(watchedContents, unwatchedContents, numberOfRandomWatchedContents, numberOfSimilarContentsPerWatched, useSingleAppearance);
+    const recommendations = findSimilar(watchedContents, unwatchedContents, numberOfRandomWatchedContents, numberOfSimilarContentsPerWatched, useSingleAppearance, includePlayed);
     return recommendations;
 
   } catch (error) {
@@ -439,8 +488,9 @@ const getSugestions = async (numberOfRandomWatchedContents = 10, numberOfSimilar
 };
 
 const getSugestionsBasedOnYourTastes = async (isStrict = false) => {
-  window.watched = window.Played || (await getPlayed());   // Your already watched items
-  window.unwatched = window.Unplayed || (await getUnplayed()); // Content pool
+  const { base, candidates } = await getScopeLists();
+  window.watched = base;        // Base items (watched, or the whole library in "all" scope)
+  window.unwatched = candidates; // Content pool
   
   // window.searchEngine = new SearchEngine();
   
@@ -483,6 +533,48 @@ async function updateRecommendations() {
     displayRecommendations(await getSugestions(ContentsToCheck, similarsToShow, false))
   } catch (error) {
     console.error("Error fetching recommendations:", error);
-    recommendationsContainer.innerHTML = '<div class="no-results-message">Error loading recommendations.</div>';
+    showRecommendationsMessage('Error loading recommendations.');
   }
+}
+
+// ======================
+// Filter Toggles (Movies/Shows, Watched only/Whole library)
+// ======================
+function syncToggleButtons() {
+  filterBar.querySelectorAll('.toggle-btn').forEach(btn => {
+    const active = (btn.dataset.type && btn.dataset.type === filterState.type) ||
+                   (btn.dataset.scope && btn.dataset.scope === filterState.scope);
+    btn.classList.toggle('active', !!active);
+    btn.setAttribute('aria-pressed', String(!!active));
+  });
+}
+
+filterBar.querySelectorAll('.toggle-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    if (btn.dataset.type) filterState.type = btn.dataset.type;
+    if (btn.dataset.scope) filterState.scope = btn.dataset.scope;
+    localStorage.setItem('recommender.type', filterState.type);
+    localStorage.setItem('recommender.scope', filterState.scope);
+    syncToggleButtons();
+    // Before login nothing is loaded yet; the saved choice is applied on the next login
+    if (!window.jellyfin?.isAuthenticated) return;
+    await refreshRecommendations();
+  });
+});
+syncToggleButtons();
+
+// Recomputes both sections from scratch with the current type/scope
+async function refreshRecommendations() {
+  resetRecommendationState(); // findSimilar.js: anchors/candidates already used
+  recommendationsShowed = 0;
+  for (const key of ['watched', 'unwatched', 'Played', 'Unplayed', 'allItems', 'recommendations', 'tasteProfile', 'profileQueries', 'searchEngine']) {
+    delete window[key];
+  }
+  clearRecommendationSections();
+  const loading = document.createElement('div');
+  loading.className = 'loading-message';
+  loading.textContent = 'Loading recommendations...';
+  recommendationsContainer.appendChild(loading);
+  await updateTestesSugestions(true);
+  await updateRecommendations();
 }
