@@ -143,6 +143,43 @@ test('tmdb.js: getExternalRecommendations excludes what is already in the librar
   assert.ok(stats.fetched > 0 && stats.excluded >= 1, 'stats report fetched/excluded counts');
 });
 
+test('tmdb.js: isInLibrary matches by TMDB id or by title+year (remakes stay)', () => {
+  const ctx = loadTmdb(async () => ({ ok: true, json: async () => ({}) }));
+  const isInLibrary = vm.runInContext('isInLibrary', ctx);
+  const buildIndex = vm.runInContext('buildLibraryTitleIndex', ctx);
+  const index = buildIndex([{ Name: 'The Thing', ProductionYear: 1982 }, { Name: 'No Year' }, { Name: 'Ação!' }]);
+  const ids = new Set(['42']);
+  assert.ok(isInLibrary({ TmdbId: '42' }, ids, index), 'TMDB id match');
+  assert.ok(isInLibrary({ TmdbId: '7', Name: 'the thing', ProductionYear: 1982 }, ids, index), 'title+year match, case-insensitive');
+  assert.ok(!isInLibrary({ TmdbId: '8', Name: 'The Thing', ProductionYear: 2011 }, ids, index), 'same title, distant year = remake, kept');
+  assert.ok(isInLibrary({ TmdbId: '9', Name: 'No Year', ProductionYear: 2020 }, ids, index), 'library side without year matches');
+  assert.ok(isInLibrary({ TmdbId: '10', Name: 'Acao', ProductionYear: 2001 }, ids, index), 'accents/punctuation normalized');
+  assert.ok(!isInLibrary({ TmdbId: '11', Name: 'Something Else', ProductionYear: 2001 }, ids, index));
+});
+
+test('tmdb.js: library items without a TMDB id still exclude their title from the recommendations', async () => {
+  const genreList = { genres: [{ id: 28, name: 'Action' }] };
+  const similar = { results: [
+    { id: 7, title: 'In Library By Title', genre_ids: [28], vote_average: 9.0, release_date: '2010-01-01', poster_path: '/a.jpg' },
+    { id: 8, title: 'Remake Year', genre_ids: [28], vote_average: 8.6, release_date: '1990-01-01' },
+    { id: 9, title: 'Fresh Pick', genre_ids: [28], vote_average: 8.4, release_date: '2012-01-01', poster_path: '/b.jpg' }
+  ] };
+  const fetchMock = async (url) => ({ ok: true, json: async () => (url.includes('/genre/') ? genreList : similar) });
+  const ctx = loadTmdb(fetchMock);
+  const getExt = vm.runInContext('getExternalRecommendations', ctx);
+  const anchor = { Id: 'a1', Name: 'Anchor', Type: 'Movie', Genres: ['Action'], ProductionYear: 2010, CommunityRating: 8.5, ProviderIds: { Tmdb: '100' } };
+  // l1 has NO ProviderIds.Tmdb but the same title/year as candidate 7; l2 same title as candidate 8 but year 2010
+  const library = [anchor,
+    { Id: 'l1', Name: 'In Library By Title', Type: 'Movie', ProductionYear: 2010, Genres: ['Action'] },
+    { Id: 'l2', Name: 'Remake Year', Type: 'Movie', ProductionYear: 2010, Genres: ['Action'] }];
+  const { groups, stats } = await getExt([anchor], library, 'Movie', 'KEY', { anchorCount: 1, perAnchor: 5 });
+  const ids = groups.flatMap(g => g.Recommendations.map(r => r.TmdbId));
+  assert.ok(!ids.includes('7'), 'same title+year without TMDB id on the library item -> excluded');
+  assert.ok(ids.includes('8'), 'same title, different year (remake) -> kept');
+  assert.ok(ids.includes('9'), 'unrelated fresh title -> kept');
+  assert.ok(stats.excluded >= 1);
+});
+
 test('tmdb.js: anchors without a Tmdb provider id are resolved through a TMDB title search', async () => {
   const genreList = { genres: [{ id: 28, name: 'Action' }] };
   const search = { results: [{ id: 555, title: 'Anchor Movie', popularity: 42 }] };
