@@ -597,6 +597,18 @@ button.load-more-btn:disabled {
 }
 
 
+/* Footer (TMDB attribution, required by the TMDB API terms of use) */
+.site-footer {
+  padding: 1.5rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.site-footer a {
+  color: rgba(255, 255, 255, 0.6);
+}
+
 /* Responsive Adjustments */
 @media (max-width: 768px) {
   .site-header {

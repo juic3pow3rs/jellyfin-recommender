@@ -155,14 +155,21 @@ score      = min(1, (0.65 × genreScore + 0.35 × tagScore) × penalty) × 100
 
 For extending the library: items **not** in Jellyfin yet, fetched from TMDB (the provider Jellyfin itself uses).
 
-1. Anchors: up to `ContentsToCheck` items of the selected type from the base list (picked with
-   `selectRandomContents`). Their TMDB id comes from `ProviderIds.Tmdb`; when an anchor has none (old cache,
+1. Anchors: up to `NEW_CONTENT_ANCHORS = 12` items of the selected type from the base list (picked with
+   `selectRandomContents`), i.e. up to ~12 rows of `similarsToShow` cards — the in-library taste section above
+   stays first. Their TMDB id comes from `ProviderIds.Tmdb`; when an anchor has none (old cache,
    Meilisearch load), it is resolved with a TMDB `/search/{movie|tv}` by title (+ production year), cached per
    anchor (`resolveAnchorTmdbId`).
 2. For each anchor, TMDB `/{movie|tv}/{tmdbId}/similar` and `/recommendations`, pages 1–3 (`TMDB_PAGES`), are
    fetched (`tmdb.js`, `api_key` = the user's own v3 key from `localStorage.tmdbApiKey`; TMDB allows CORS from
    the browser). More pages because page 1 is often full of titles the library already has. Genre ids are
    translated to names with `/genre/{movie|tv}/list` (cached per type).
+   **Rate limits** ([developer.themoviedb.org/docs/rate-limiting](https://developer.themoviedb.org/docs/rate-limiting)):
+   the legacy 40 req/10 s limit is disabled; a CDN ceiling of ~40–50 req/s per IP remains. `tmdbFetch` keeps a
+   sliding window of at most `TMDB_MAX_REQ_PER_SEC = 40` requests/second and, on HTTP 429, waits 2 s and retries
+   once. 12 anchors × 6 requests ≈ 72 requests ≈ ~2 s. Per the
+   [API terms of use](https://www.themoviedb.org/api-terms-of-use) (non-commercial use requires attribution),
+   the footer shows "This product uses the TMDB API but is not endorsed or certified by TMDB."
 3. Candidates already in the library are dropped: by TMDB id (`buildLibraryTmdbIds`) **and** by normalized
    title + production year (`buildLibraryTitleIndex` / `isInLibrary`), so library items without a `Tmdb`
    provider id still exclude their title. Same title with a distant year is a remake — a different TMDB item —

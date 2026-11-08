@@ -14,6 +14,9 @@ const RECOMMENDABLE_TYPES = ["Audio", "Video", "Book", "Movie", "Series"];
 let ContentsToCheck = 3;
 let similarsToShow = 6;
 let recommendationsShowed = 0;
+// Anchor groups in the external "New to your library" section (each a row of similarsToShow cards).
+// Costs ~6 TMDB requests per anchor (2 endpoints x 3 pages), throttled in tmdb.js.
+const NEW_CONTENT_ANCHORS = 12;
 
 const noImage = "https://placehold.co/200x280/808080/FFFFFF?text=No+Image"
 
@@ -630,7 +633,7 @@ async function updateNewContent() {
     const { base } = await getScopeLists();
     const libraryItems = await getAll(); // everything of this type, to exclude what the user already has
     const { groups, stats } = await getExternalRecommendations(base, libraryItems, filterState.type, apiKey, {
-      anchorCount: ContentsToCheck,
+      anchorCount: NEW_CONTENT_ANCHORS,
       perAnchor: similarsToShow
     });
     console.info('[tmdb] anchors:', stats.anchors, '| with TMDB id:', stats.anchorsWithId, '| fetched:', stats.fetched, '| already in library:', stats.excluded, '| groups:', stats.groups);
