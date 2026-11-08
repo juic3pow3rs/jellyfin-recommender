@@ -61,8 +61,18 @@
             <button type="button" class="toggle-btn" data-scope="watched" aria-pressed="true">Watched only</button>
             <button type="button" class="toggle-btn" data-scope="all" aria-pressed="false">Whole library</button>
           </div>
+          <div class="toggle-group" role="group" aria-label="Recommendations outside the library">
+            <span class="toggle-label" id="newToggleLabel">New to library:</span>
+            <button type="button" class="toggle-btn" data-new="off" aria-pressed="true">Off</button>
+            <button type="button" class="toggle-btn" data-new="on" aria-pressed="false">On</button>
+          </div>
+          <div class="toggle-group tmdb-key-group">
+            <label class="toggle-label" for="tmdbApiKey">TMDB API key:</label>
+            <input type="password" id="tmdbApiKey" placeholder="optional, enables \"New to library\"" autocomplete="off">
+          </div>
         </div>
         <div id="taste-recommendations-container" class="because-you-watched-container"></div>
+        <div id="new-content-container" class="because-you-watched-container"></div>
         <!-- Content recommendations will be loaded here -->
         <div class="loading-message">
             Loading recommendations...
@@ -85,6 +95,7 @@
     <script src="js/vendor/search.js"></script>
     <!-- <script src="search.js"></script> -->
     <script src="findSimilar.js" defer></script>
+    <script src="tmdb.js" defer></script>
     <script src="script.js" defer></script>
     <script src="script_infinity_scroll.js" defer></script>
 </body>

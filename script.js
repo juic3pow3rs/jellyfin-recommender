@@ -17,14 +17,19 @@ let recommendationsShowed = 0;
 
 const noImage = "https://placehold.co/200x280/808080/FFFFFF?text=No+Image"
 
-// --- Filter state: Movies/Shows toggle and Watched only/Whole library scope (persisted) ---
+// --- Filter state: Movies/Shows, Watched only/Whole library, New-to-library (all persisted) ---
 const filterBar = document.getElementById('filter-bar');
+const newContentContainer = document.getElementById('new-content-container');
+const tmdbKeyInput = document.getElementById('tmdbApiKey');
 const filterState = {
   type: localStorage.getItem('recommender.type') || 'Movie',
-  scope: localStorage.getItem('recommender.scope') || 'watched'
+  scope: localStorage.getItem('recommender.scope') || 'watched',
+  newContent: localStorage.getItem('recommender.newContent') || 'off'
 };
 if (!RECOMMENDABLE_TYPES.includes(filterState.type)) filterState.type = 'Movie';
 if (!['watched', 'all'].includes(filterState.scope)) filterState.scope = 'watched';
+if (!['off', 'on'].includes(filterState.newContent)) filterState.newContent = 'off';
+if (tmdbKeyInput) tmdbKeyInput.value = localStorage.getItem('tmdbApiKey') || '';
 
 // Function to generate Jellyfin Content detail URL
 function makeContentUrl(id) {
@@ -97,31 +102,34 @@ function createContentCard(Content) {
 
   ContentCard.append(img, info);
 
+  // External (TMDB) items open their TMDB page; library items open the Jellyfin details page
+  const contentUrl = Content.ExternalUrl || makeContentUrl(Content.Id);
 
   // Make the Content card clickable to open the Content details in Jellyfin
   ContentCard.addEventListener('click', () => {
-    window.open(makeContentUrl(Content.Id), '_blank');
+    window.open(contentUrl, '_blank');
   });
 
   // Add keyboard accessibility for card click
   ContentCard.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault(); // Prevent default scroll or action
-      window.open(makeContentUrl(Content.Id), '_blank');
+      window.open(contentUrl, '_blank');
     }
   });
   ContentCard.setAttribute('tabindex', '0'); // Make it focusable
   // Announced as a link to the item in Jellyfin (Enter/Space open it, see above)
   ContentCard.setAttribute('role', 'link');
-  ContentCard.setAttribute('aria-label', `${Content.Name} — open in Jellyfin`);
+  ContentCard.setAttribute('aria-label', `${Content.Name} — open in ${Content.ExternalUrl ? 'TMDB' : 'Jellyfin'}`);
 
   return ContentCard;
 }
 
 // Function to display recommendations
 // append: a later batch (infinite scroll) — an empty batch then adds nothing instead of replacing the page
-function displayRecommendations(recommendations, { append = false } = {}) {
-  const loadingMessage = document.querySelector('.loading-message');
+// container: where to render (defaults to the main container; the "new to library" section has its own)
+function displayRecommendations(recommendations, { append = false, container = recommendationsContainer } = {}) {
+  const loadingMessage = container.querySelector('.loading-message');
   if (loadingMessage) {
     loadingMessage.remove(); // Remove the loading message
   }
@@ -132,7 +140,7 @@ function displayRecommendations(recommendations, { append = false } = {}) {
     const message = document.createElement('div');
     message.className = 'no-results-message';
     message.textContent = 'No recommendations found. Try watching more Contents!';
-    recommendationsContainer.appendChild(message);
+    container.appendChild(message);
     return;
   }
 
@@ -140,12 +148,12 @@ function displayRecommendations(recommendations, { append = false } = {}) {
     // Ensure watchedContentData and watchedContentData.Recommendations are valid
     if (!watchedContentData || !watchedContentData.Recommendations) return;
 
-    const { container, ContentGrid } = createBecauseYouWatchedContainer(watchedContentData);
+    const { container: groupContainer, ContentGrid } = createBecauseYouWatchedContainer(watchedContentData);
     watchedContentData.Recommendations.forEach(Content => {
       const ContentCardElement = createContentCard(Content);
       ContentGrid.appendChild(ContentCardElement);
     });
-    recommendationsContainer.appendChild(container);
+    container.appendChild(groupContainer);
   });
 }
 
@@ -200,12 +208,15 @@ function displayBasedOnYourTastes(recommendations) {
   createBasedOnTastesContainer(recommendations);
 }
 
-// Removes only the recommendation sections: the filter bar and the taste container element stay in place
+// Removes only the recommendation sections: the filter bar and the named container elements stay in place
 function clearRecommendationSections() {
   recommendationsContainer
-    .querySelectorAll('.because-you-watched-container:not(#taste-recommendations-container), .no-results-message, .loading-message')
+    .querySelectorAll('.because-you-watched-container:not(#taste-recommendations-container):not(#new-content-container), .no-results-message, .loading-message')
     .forEach(el => el.remove());
-  document.getElementById('taste-recommendations-container').innerHTML = '';
+  for (const id of ['taste-recommendations-container', 'new-content-container']) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '';
+  }
 }
 
 function showRecommendationsMessage(text) {
@@ -283,6 +294,7 @@ function InitializeJellyfin(explicitLogin = false) {
       // Fetch and display recommendations when libraries are loaded
       await updateTestesSugestions(true);
       await updateRecommendations();
+      await updateNewContent();
     },
     onSearchFinish: () => {
       // This callback might be for search results, not directly used here for recommendations.
@@ -543,7 +555,8 @@ async function updateRecommendations() {
 function syncToggleButtons() {
   filterBar.querySelectorAll('.toggle-btn').forEach(btn => {
     const active = (btn.dataset.type && btn.dataset.type === filterState.type) ||
-                   (btn.dataset.scope && btn.dataset.scope === filterState.scope);
+                   (btn.dataset.scope && btn.dataset.scope === filterState.scope) ||
+                   (btn.dataset.new && btn.dataset.new === filterState.newContent);
     btn.classList.toggle('active', !!active);
     btn.setAttribute('aria-pressed', String(!!active));
   });
@@ -553,8 +566,10 @@ filterBar.querySelectorAll('.toggle-btn').forEach(btn => {
   btn.addEventListener('click', async () => {
     if (btn.dataset.type) filterState.type = btn.dataset.type;
     if (btn.dataset.scope) filterState.scope = btn.dataset.scope;
+    if (btn.dataset.new) filterState.newContent = btn.dataset.new;
     localStorage.setItem('recommender.type', filterState.type);
     localStorage.setItem('recommender.scope', filterState.scope);
+    localStorage.setItem('recommender.newContent', filterState.newContent);
     syncToggleButtons();
     // Before login nothing is loaded yet; the saved choice is applied on the next login
     if (!window.jellyfin?.isAuthenticated) return;
@@ -562,6 +577,48 @@ filterBar.querySelectorAll('.toggle-btn').forEach(btn => {
   });
 });
 syncToggleButtons();
+
+// The TMDB key is saved on change; with "New to library" on, the section is recomputed
+tmdbKeyInput?.addEventListener('change', () => {
+  localStorage.setItem('tmdbApiKey', tmdbKeyInput.value.trim());
+  if (filterState.newContent === 'on' && window.jellyfin?.isAuthenticated) refreshRecommendations();
+});
+
+// "New to your library": recommendations for items NOT in the Jellyfin library yet (via TMDB, tmdb.js)
+async function updateNewContent() {
+  if (!newContentContainer) return;
+  newContentContainer.innerHTML = '';
+  if (filterState.newContent !== 'on') return;
+
+  const apiKey = localStorage.getItem('tmdbApiKey') || '';
+  if (!apiKey) {
+    const hint = document.createElement('div');
+    hint.className = 'no-results-message';
+    hint.textContent = 'Enter your TMDB API key in the bar above to get recommendations outside your library.';
+    newContentContainer.appendChild(hint);
+    return;
+  }
+
+  try {
+    const { base } = await getScopeLists();
+    const libraryItems = await getAll(); // everything of this type, to exclude what the user already has
+    const groups = await getExternalRecommendations(base, libraryItems, filterState.type, apiKey, {
+      anchorCount: ContentsToCheck,
+      perAnchor: similarsToShow
+    });
+    const title = document.createElement('h2');
+    title.classList.add('because-you-watched-title');
+    title.textContent = 'New to your library (not in Jellyfin yet)';
+    newContentContainer.appendChild(title);
+    displayRecommendations(groups, { container: newContentContainer });
+  } catch (error) {
+    console.error('Error fetching external recommendations:', error);
+    const message = document.createElement('div');
+    message.className = 'no-results-message';
+    message.textContent = 'Error loading new-content recommendations.';
+    newContentContainer.appendChild(message);
+  }
+}
 
 // Recomputes both sections from scratch with the current type/scope
 async function refreshRecommendations() {
@@ -577,4 +634,5 @@ async function refreshRecommendations() {
   recommendationsContainer.appendChild(loading);
   await updateTestesSugestions(true);
   await updateRecommendations();
+  await updateNewContent();
 }

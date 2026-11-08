@@ -23,6 +23,7 @@ Published at `https://jeffersoncgo.github.io/content-recommender/`. No build, no
 | `style.css` | Dark theme, responsive card grid (≤ 768 px and ≤ 480 px) |
 | `script.js` | Login, filter state (type/scope), collecting played/unplayed/all items, rendering the cards |
 | `findSimilar.js` | Similarity and taste algorithms, type filter, anchor/candidate state |
+| `tmdb.js` | External ("new to your library") recommendations via the TMDB API |
 | `script_infinity_scroll.js` | Fetches more "Because you watched" groups when nearing the end of the page (one batch at a time) |
 | `js/vendor/` | Copies of the dependencies (below) |
 | `Dockerfile`, `docker-compose.yml`, `.dockerignore` | Serve the static app with nginx (port 8080) |
@@ -63,7 +64,8 @@ InitializeJellyfin(explicitLogin)                  explicitLogin = Connect butto
      └─ Sign out → jellyfin.logout() + reload      POST /Sessions/Logout, deletes the saved session
      └─ onLibraryLoad
          ├─ updateTestesSugestions(true)           "Based on Your General Watched Content" section
-         └─ updateRecommendations()                "Because you watched" section (3 anchors × 6 items)
+         ├─ updateRecommendations()                "Because you watched" section (3 anchors × 6 items)
+         └─ updateNewContent()                     "New to your library" section (only when enabled)
 ```
 
 Filter toggles (`#filter-bar`, visible after login, persisted in `localStorage` as `recommender.type` /
@@ -74,9 +76,11 @@ Filter toggles (`#filter-bar`, visible after login, persisted in `localStorage` 
 - **Scope** — `watched` (default): played items as anchors, unplayed as candidates; `all`: the whole library as
   both anchors and candidates (`findSimilar(…, includePlayed = true)` keeps already watched candidates, and the
   section titles become "Similar to …" / "Based on Your Whole Library").
+- **New to library** — `off` (default) / `on`: with `on` and a TMDB API key set, an extra section
+  (`#new-content-container`) shows recommendations **outside** the library (see §5b).
 
-Changing a toggle calls `refreshRecommendations()`: resets the anchor/candidate state
-(`resetRecommendationState`), clears the cached lists and both sections, then recomputes them.
+Changing a toggle (or the TMDB key) calls `refreshRecommendations()`: resets the anchor/candidate state
+(`resetRecommendationState`), clears the cached lists and the sections, then recomputes them.
 
 `getList(…, 'Played'|'Unplayed'|'All')` sets `searchParams.PlayedOnly/UnplayedOnly` (`'All'` clears both),
 
@@ -141,6 +145,21 @@ score      = min(1, (0.65 × genreScore + 0.35 × tagScore) × penalty) × 100
   loading fewer types here would make each app reload the other's cache on every visit.
 - The "played" status is refreshed on every load (`needsUserData = true`), even with the library coming from the cache.
 
+### 5b. External recommendations (`tmdb.js`, "New to your library")
+
+For extending the library: items **not** in Jellyfin yet, fetched from TMDB (the provider Jellyfin itself uses).
+
+1. Anchors: up to `ContentsToCheck` items of the selected type from the base list that have a `ProviderIds.Tmdb`
+   id (picked with `selectRandomContents`).
+2. For each anchor, TMDB `/{movie|tv}/{tmdbId}/similar` and `/recommendations` (page 1) are fetched
+   (`tmdb.js`, `api_key` = the user's own key from `localStorage.tmdbApiKey`; TMDB allows CORS from the browser).
+   Genre ids are translated to names with `/genre/{movie|tv}/list` (cached per type).
+3. Candidates whose TMDB id is already in the library (`buildLibraryTmdbIds` over the whole type-filtered library)
+   are dropped, duplicates across the two endpoints and across anchors are removed.
+4. The rest is ranked with the same `calculateSimilarity` + `> 15` threshold as in-library recommendations
+   (`rankExternalCandidates`) and shown per anchor in `#new-content-container`. Cards carry `ExternalUrl`
+   (the TMDB page) instead of a Jellyfin details link. To add such an item, search its title in Jellyfin.
+
 ## 6. Configuration
 
 | What | Where |
@@ -154,13 +173,16 @@ score      = min(1, (0.65 × genreScore + 0.35 × tagScore) × penalty) × 100
 | Card image size | `POSTER_WIDTH × POSTER_HEIGHT = 360 × 540` (portrait, 2× the card), quality 80, in `findSimilar.js` |
 | Type toggle (Movies/Shows) | `filterState.type`, `localStorage` key `recommender.type` (default `Movie`) |
 | Scope toggle (Watched only/Whole library) | `filterState.scope`, `localStorage` key `recommender.scope` (default `watched`) |
+| New-to-library toggle | `filterState.newContent`, `localStorage` key `recommender.newContent` (default `off`) |
+| TMDB API key (external recommendations) | `localStorage` key `tmdbApiKey`, field `#tmdbApiKey` |
 
 ## 7. Storage
 
 | Where | Key | Content |
 |---|---|---|
 | `localStorage` | `server` | Server address |
-| `localStorage` | `recommender.type` / `recommender.scope` | Filter toggles (Movies/Shows, Watched only/Whole library) |
+| `localStorage` | `recommender.type` / `recommender.scope` / `recommender.newContent` | Filter toggles (Movies/Shows, Watched only/Whole library, New to library) |
+| `localStorage` | `tmdbApiKey` | TMDB API key for external recommendations (sent only to `api.themoviedb.org`) |
 | `localStorage` | `jellyfinAuth` | Session `{ server, serverId, userId, token }` (`Jellyfin` class; never the password) |
 | `localStorage` | `username`, `password` | Only from old versions: used once to get the token, then deleted |
 | IndexedDB `pageMemoryDB` | Page URL | `[save]` fields (only the server; username and password are no longer saved) |
@@ -173,8 +195,9 @@ Since CoverMaker and this app are on the same origin (`jeffersoncgo.github.io`),
 ## 8. Tests
 
 `node --test "tests/*.test.js"` (Node 20+): syntax, dependencies in `js/vendor/` present and loaded by `index.html`,
-the filter toggles and the Docker files in `index.html`/repo, tokenizer, shuffle, type filter and the
-`includePlayed` behavior of `findSimilar`. With `cdn` and `CoverMaker` cloned next to it, it also checks that the
+the filter toggles and the Docker files in `index.html`/repo, tokenizer, shuffle, type filter, the
+`includePlayed` behavior of `findSimilar`, and the `tmdb.js` helpers (normalization, library-id exclusion,
+ranking) with a mocked `fetch`. With `cdn` and `CoverMaker` cloned next to it, it also checks that the
 copies are identical to the originals. Runs in CI on every push (`.github/workflows/tests.yml`). Browser tests:
 `CoverMaker/tests/browser/cr_auth.js`.
 
