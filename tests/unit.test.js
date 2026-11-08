@@ -130,8 +130,8 @@ test('tmdb.js: getExternalRecommendations excludes what is already in the librar
   const anchor = { Id: 'a1', Name: 'Anchor', Type: 'Movie', Genres: ['Action', 'Science Fiction'], ProductionYear: 2010, CommunityRating: 8.5, ProviderIds: { Tmdb: '100' }, UserData: { Played: true } };
   const library = [anchor, { Id: 'l1', Type: 'Movie', ProviderIds: { Tmdb: '1' }, Genres: ['Action'] }];
 
-  assert.equal((await getExt([anchor], library, 'Movie', '')).length, 0, 'no API key -> no external recommendations');
-  const groups = await getExt([anchor], library, 'Movie', 'KEY', { anchorCount: 1, perAnchor: 5 });
+  assert.equal((await getExt([anchor], library, 'Movie', '')).groups.length, 0, 'no API key -> no external recommendations');
+  const { groups, stats } = await getExt([anchor], library, 'Movie', 'KEY', { anchorCount: 1, perAnchor: 5 });
   assert.equal(groups.length, 1);
   assert.equal(groups[0].Name, 'Anchor');
   const ids = groups[0].Recommendations.map(r => r.TmdbId);
@@ -139,6 +139,25 @@ test('tmdb.js: getExternalRecommendations excludes what is already in the librar
   assert.ok(!ids.includes('1'), 'item already in the library is never recommended as new');
   assert.ok(!ids.includes('3'), 'low-similarity item below the threshold is dropped');
   assert.ok(groups[0].Recommendations[0].ExternalUrl.startsWith('https://www.themoviedb.org/movie/'));
+  assert.equal(stats.anchorsWithId, 1);
+  assert.ok(stats.fetched > 0 && stats.excluded >= 1, 'stats report fetched/excluded counts');
+});
+
+test('tmdb.js: anchors without a Tmdb provider id are resolved through a TMDB title search', async () => {
+  const genreList = { genres: [{ id: 28, name: 'Action' }] };
+  const search = { results: [{ id: 555, title: 'Anchor Movie', popularity: 42 }] };
+  const similar = { results: [{ id: 9, title: 'Fresh Pick', genre_ids: [28], vote_average: 8.4, release_date: '2012-01-01', poster_path: '/b.jpg' }] };
+  const fetchMock = async (url) => ({
+    ok: true,
+    json: async () => (url.includes('/genre/') ? genreList : url.includes('/search/') ? search : similar)
+  });
+  const ctx = loadTmdb(fetchMock);
+  const getExt = vm.runInContext('getExternalRecommendations', ctx);
+  const anchor = { Id: 'a1', Name: 'Anchor Movie', Type: 'Movie', Genres: ['Action'], ProductionYear: 2010, CommunityRating: 8.5, ProviderIds: {}, UserData: { Played: true } };
+  const { groups, stats } = await getExt([anchor], [anchor], 'Movie', 'KEY', { anchorCount: 1, perAnchor: 5 });
+  assert.equal(stats.anchorsWithId, 1, 'search fallback resolved the TMDB id');
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].Recommendations[0].TmdbId, '9');
 });
 
 test('tokenizeName: same tokens as before for ASCII titles, accents and other scripts kept (CR-11)', () => {

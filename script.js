@@ -128,7 +128,7 @@ function createContentCard(Content) {
 // Function to display recommendations
 // append: a later batch (infinite scroll) — an empty batch then adds nothing instead of replacing the page
 // container: where to render (defaults to the main container; the "new to library" section has its own)
-function displayRecommendations(recommendations, { append = false, container = recommendationsContainer } = {}) {
+function displayRecommendations(recommendations, { append = false, container = recommendationsContainer, emptyMessage = 'No recommendations found. Try watching more Contents!' } = {}) {
   const loadingMessage = container.querySelector('.loading-message');
   if (loadingMessage) {
     loadingMessage.remove(); // Remove the loading message
@@ -139,7 +139,7 @@ function displayRecommendations(recommendations, { append = false, container = r
     // Added after the taste section instead of replacing the whole container (which erased that section too)
     const message = document.createElement('div');
     message.className = 'no-results-message';
-    message.textContent = 'No recommendations found. Try watching more Contents!';
+    message.textContent = emptyMessage;
     container.appendChild(message);
     return;
   }
@@ -610,14 +610,23 @@ async function updateNewContent() {
   try {
     const { base } = await getScopeLists();
     const libraryItems = await getAll(); // everything of this type, to exclude what the user already has
-    const groups = await getExternalRecommendations(base, libraryItems, filterState.type, apiKey, {
+    const { groups, stats } = await getExternalRecommendations(base, libraryItems, filterState.type, apiKey, {
       anchorCount: ContentsToCheck,
       perAnchor: similarsToShow
     });
+    console.info('[tmdb] anchors:', stats.anchors, '| with TMDB id:', stats.anchorsWithId, '| fetched:', stats.fetched, '| already in library:', stats.excluded, '| groups:', stats.groups);
     const title = document.createElement('h2');
     title.classList.add('because-you-watched-title');
     title.textContent = 'New to your library (not in Jellyfin yet)';
     newContentContainer.appendChild(title);
+    if (!groups.length) {
+      let reason = 'no similar title scored high enough for the current anchors.';
+      if (stats.anchorsWithId === 0) reason = 'none of the base items could be matched on TMDB (no TMDB id, no title match).';
+      else if (stats.fetched === 0) reason = 'TMDB returned nothing for the anchors — see the browser console.';
+      else if (stats.excluded >= stats.fetched && stats.fetched > 0) reason = 'every similar title TMDB suggests is already in your library.';
+      displayRecommendations([], { container: newContentContainer, emptyMessage: `New to your library: ${reason}` });
+      return;
+    }
     displayRecommendations(groups, { container: newContentContainer });
   } catch (error) {
     console.error('Error fetching external recommendations:', error);
