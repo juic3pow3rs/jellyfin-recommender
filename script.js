@@ -585,6 +585,22 @@ tmdbKeyInput?.addEventListener('change', () => {
   if (filterState.newContent === 'on' && window.jellyfin?.isAuthenticated) refreshRecommendations();
 });
 
+// Shuffle: reset the anchor memory and recompute, so different anchor movies/shows are picked
+// (both the in-library "Because you watched" groups and the external "New to library" ones)
+const shuffleBtn = document.getElementById('shuffleBtn');
+let shuffling = false;
+shuffleBtn?.addEventListener('click', async () => {
+  if (shuffling || !window.jellyfin?.isAuthenticated) return;
+  shuffling = true;
+  shuffleBtn.setAttribute('inactive', 'true');
+  try {
+    await refreshRecommendations();
+  } finally {
+    shuffling = false;
+    shuffleBtn.removeAttribute('inactive');
+  }
+});
+
 // "New to your library": recommendations for items NOT in the Jellyfin library yet (via TMDB, tmdb.js)
 async function updateNewContent() {
   if (!newContentContainer) return;

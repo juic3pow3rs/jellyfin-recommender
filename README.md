@@ -16,7 +16,8 @@ This project is a web application that leverages your Jellyfin server to recomme
 *   **Jellyfin Integration:** Connects directly to your Jellyfin server to fetch your library data.
 *   **Movies or Shows:** Toggle the recommendations between movies and shows.
 *   **Watched only or Whole library:** Base the recommendations on your watch history only (recommending just unwatched items) or on the whole library.
-*   **New to your library:** Optionally get recommendations for movies/shows that are **not in your Jellyfin library yet** (via TMDB, using your own free API key). Anything already in your library is excluded; results are ranked with the same similarity algorithm and open on TMDB, so you can search the title in Jellyfin to add it.
+*   **New to your library:** Optionally get recommendations for movies/shows that are **not in your Jellyfin library yet** (via TMDB, using your own free API key). Anything already in your library is excluded; results are ranked with the same similarity algorithm and open on TMDB, so you can search the title in Jellyfin to add it. A divider separates this section from the in-library recommendations below it.
+*   **Shuffle:** The Shuffle button re-rolls the anchor movies/shows and recomputes all recommendations.
 *   **Configurable Similarity:** The `findSimilar.js` file allows you to adjust the weights for different attributes (genres, tags, rating, year, title) to fine-tune the recommendation algorithm.
 *   **User-Friendly Interface:** A clean and intuitive interface to log in to your Jellyfin server and view recommendations.
 *   **Web-Based:** Accessible directly through your web browser without any local installation (via the provided GitHub Pages link or the Docker container).
