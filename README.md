@@ -16,6 +16,7 @@ This project is a web application that leverages your Jellyfin server to recomme
 *   **Jellyfin Integration:** Connects directly to your Jellyfin server to fetch your library data.
 *   **Movies or Shows:** Toggle the recommendations between movies and shows.
 *   **Watched only or Whole library:** Base the recommendations on your watch history only (recommending just unwatched items) or on the whole library.
+*   **New to your library:** Optionally get recommendations for movies/shows that are **not in your Jellyfin library yet** (via TMDB, using your own free API key). Anything already in your library is excluded; results are ranked with the same similarity algorithm and open on TMDB, so you can search the title in Jellyfin to add it.
 *   **Configurable Similarity:** The `findSimilar.js` file allows you to adjust the weights for different attributes (genres, tags, rating, year, title) to fine-tune the recommendation algorithm.
 *   **User-Friendly Interface:** A clean and intuitive interface to log in to your Jellyfin server and view recommendations.
 *   **Web-Based:** Accessible directly through your web browser without any local installation (via the provided GitHub Pages link or the Docker container).
@@ -34,6 +35,7 @@ This project is a web application that leverages your Jellyfin server to recomme
     `WEIGHTS` also lists critic rating, actors, directors/writers and studios, but they are not used in the
     calculation yet (the app does not download people or studios for every item).
 4.  **Recommendation Generation:** It then selects a subset of your watched Contents and generates recommendations for each, displaying the top-scoring similar unwatched Contents.
+5.  **External Recommendations (optional):** With **New to library: On** and a TMDB API key set, a "New to your library" section shows movies/shows from TMDB that are not in your library yet — similar/recommended titles of your watched anchors (matched through their TMDB id), filtered against your whole library and ranked with the same similarity score. Get a free key at [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api); the key is stored only in your browser's `localStorage` and is only sent to `api.themoviedb.org`.
 
 ## Live Demo
 
@@ -47,6 +49,7 @@ You can try out the Content Recommender directly on GitHub Pages:
 *   **`style.css`**: Contains all the CSS for styling the application, ensuring a visually appealing and responsive design.
 *   **`script.js`**: The main JavaScript file responsible for handling user interactions, connecting to Jellyfin, processing recommendations, and displaying them.
 *   **`findSimilar.js`**: Contains the core logic for calculating Content similarities and generating recommendations. This is where you can tweak the `WEIGHTS` object to customize the recommendation algorithm.
+*   **`tmdb.js`**: Fetches recommendations for Contents **not in your library yet** from TMDB (similar/recommended titles of your watched items, minus everything already in the library), ranked with the same similarity function.
 *   **`js/vendor/`**: Copies of the shared libraries it uses — Jellyfin API client and window handling from [CoverMaker](https://github.com/jeffersoncgo/CoverMaker), utilities from [cdn](https://github.com/jeffersoncgo/cdn). Kept as copies so a change in those repositories cannot break this app unnoticed.
 *   **`Dockerfile` / `docker-compose.yml` / `.dockerignore`**: Serve the app as a Docker container (nginx, static files only).
 
