@@ -9,6 +9,12 @@
 const TMDB_API = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE = 'https://image.tmdb.org/t/p/w342'; // poster width matching the cards (~180px, 2x)
 
+// The app uses the v3 key as an api_key= query parameter: 32 hex characters. The v4 "API Read Access Token"
+// is a JWT (starts with "eyJ") for Bearer-header auth and does not work here.
+function tmdbKeyLooksValid(apiKey) {
+  return /^[a-f0-9]{32}$/i.test(apiKey || '');
+}
+
 const tmdbGenreMaps = {}; // type ('Movie'|'Series') -> { genreId: name }
 
 async function tmdbFetch(path, apiKey) {
