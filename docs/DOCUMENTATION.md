@@ -157,8 +157,10 @@ For extending the library: items **not** in Jellyfin yet, fetched from TMDB (the
    fetched (`tmdb.js`, `api_key` = the user's own v3 key from `localStorage.tmdbApiKey`; TMDB allows CORS from
    the browser). More pages because page 1 is often full of titles the library already has. Genre ids are
    translated to names with `/genre/{movie|tv}/list` (cached per type).
-3. Candidates whose TMDB id is already in the library (`buildLibraryTmdbIds` over the whole type-filtered library)
-   are dropped, duplicates across endpoints/pages/anchors are removed.
+3. Candidates already in the library are dropped: by TMDB id (`buildLibraryTmdbIds`) **and** by normalized
+   title + production year (`buildLibraryTitleIndex` / `isInLibrary`), so library items without a `Tmdb`
+   provider id still exclude their title. Same title with a distant year is a remake — a different TMDB item —
+   and is kept. Duplicates across endpoints/pages/anchors are removed.
 4. The rest is ranked with the same `calculateSimilarity` + `> 15` threshold as in-library recommendations
    (`rankExternalCandidates`) and shown per anchor in `#new-content-container`. Cards carry `ExternalUrl`
    (the TMDB page) instead of a Jellyfin details link. To add such an item, search its title in Jellyfin.

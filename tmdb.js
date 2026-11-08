@@ -66,6 +66,38 @@ function buildLibraryTmdbIds(items) {
   return ids;
 }
 
+function normalizeTitle(name) {
+  return (name || '')
+    .normalize('NFD').replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Title index of the library for items whose TMDB id is unknown (old cache, Meilisearch load):
+// normalized title -> list of known production years (null when missing)
+function buildLibraryTitleIndex(items) {
+  const index = new Map();
+  for (const item of items || []) {
+    const key = normalizeTitle(item?.Name);
+    if (!key) continue;
+    if (!index.has(key)) index.set(key, []);
+    index.get(key).push(item?.ProductionYear ?? null);
+  }
+  return index;
+}
+
+// A candidate counts as "already in the library" when its TMDB id matches, or when title matches and the
+// years agree (or one side has no year). Same title with a distant year is a remake: a different TMDB item.
+function isInLibrary(candidate, libraryIds, titleIndex) {
+  if (libraryIds.has(candidate.TmdbId)) return true;
+  const years = titleIndex.get(normalizeTitle(candidate.Name));
+  if (!years) return false;
+  const y = candidate.ProductionYear;
+  return years.some(ly => !y || !ly || Math.abs(ly - y) <= 2);
+}
+
 const TMDB_PAGES = 3; // pages per endpoint: page 1 is often full of titles the library already has
 const anchorTmdbIdCache = new Map(); // anchor.Id -> tmdb id (or null)
 
@@ -132,6 +164,7 @@ async function getExternalRecommendations(anchors, libraryItems, type, apiKey, {
   if (!apiKey || !anchors?.length) return { groups: [], stats };
   const genreMap = await tmdbGenreMap(type, apiKey);
   const libraryIds = buildLibraryTmdbIds(libraryItems);
+  const titleIndex = buildLibraryTitleIndex(libraryItems);
   const rarityProfile = buildRarityMap([...(anchors || []), ...(libraryItems || [])]);
   const picked = selectRandomContents(anchors, anchorCount);
   const usedIds = new Set();
@@ -142,7 +175,7 @@ async function getExternalRecommendations(anchors, libraryItems, type, apiKey, {
     if (tmdbId) stats.anchorsWithId++;
     const raw = await fetchTmdbSimilarForAnchor(anchor, tmdbId, type, apiKey, genreMap);
     stats.fetched += raw.length;
-    const fresh = raw.filter(c => !libraryIds.has(c.TmdbId) && !usedIds.has(c.TmdbId));
+    const fresh = raw.filter(c => !isInLibrary(c, libraryIds, titleIndex) && !usedIds.has(c.TmdbId));
     stats.excluded += raw.length - fresh.length;
     const recommendations = rankExternalCandidates(anchor, fresh, rarityProfile, perAnchor);
     if (!recommendations.length) return null;
