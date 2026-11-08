@@ -591,11 +591,19 @@ async function updateNewContent() {
   if (filterState.newContent !== 'on') return;
 
   const apiKey = localStorage.getItem('tmdbApiKey') || '';
+  const hint = (text) => {
+    const el = document.createElement('div');
+    el.className = 'no-results-message';
+    el.textContent = text;
+    newContentContainer.appendChild(el);
+  };
   if (!apiKey) {
-    const hint = document.createElement('div');
-    hint.className = 'no-results-message';
-    hint.textContent = 'Enter your TMDB API key in the bar above to get recommendations outside your library.';
-    newContentContainer.appendChild(hint);
+    hint('Enter your TMDB API key in the bar above to get recommendations outside your library.');
+    return;
+  }
+  // Fail fast on the wrong kind of key: the v4 Read Access Token (JWT) instead of the v3 API Key (32 hex chars)
+  if (typeof tmdbKeyLooksValid === 'function' && !tmdbKeyLooksValid(apiKey)) {
+    hint('That does not look like a TMDB v3 API key (32 hex characters). Use the "API Key" from themoviedb.org/settings/api, not the v4 "Read Access Token".');
     return;
   }
 
@@ -613,10 +621,8 @@ async function updateNewContent() {
     displayRecommendations(groups, { container: newContentContainer });
   } catch (error) {
     console.error('Error fetching external recommendations:', error);
-    const message = document.createElement('div');
-    message.className = 'no-results-message';
-    message.textContent = 'Error loading new-content recommendations.';
-    newContentContainer.appendChild(message);
+    // error.message carries the TMDB status (e.g. "TMDB responded 401"), never the key
+    hint(`Error loading new-content recommendations (${error.message}). Check the TMDB API key and your network.`);
   }
 }
 

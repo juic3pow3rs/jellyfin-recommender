@@ -98,6 +98,17 @@ test('tmdb.js: normalizeTmdbItem shapes movies and shows like library items', ()
   assert.equal(show.ImageUrl, undefined);
 });
 
+test('tmdb.js: tmdbKeyLooksValid accepts only 32-hex v3 keys, not the v4 token', () => {
+  const ctx = loadTmdb(async () => ({ ok: true, json: async () => ({}) }));
+  const valid = vm.runInContext('tmdbKeyLooksValid', ctx);
+  assert.ok(valid('0123456789abcdef0123456789abcdef'));
+  assert.ok(valid('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'));
+  assert.ok(!valid('eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.abc'), 'v4 Read Access Token (JWT) must be rejected');
+  assert.ok(!valid(''));
+  assert.ok(!valid('short'));
+  assert.ok(!valid('z'.repeat(32)));
+});
+
 test('tmdb.js: buildLibraryTmdbIds collects the Tmdb provider ids of the library', () => {
   const ctx = loadTmdb(async () => ({ ok: true, json: async () => ({}) }));
   const build = vm.runInContext('buildLibraryTmdbIds', ctx);
