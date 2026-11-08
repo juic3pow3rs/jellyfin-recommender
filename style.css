@@ -147,6 +147,68 @@ body {
   display: inline-flex; /* Use flex for alignment */
 }
 
+/* Filter Bar (Movies/Shows, Watched only/Whole library) */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 2rem;
+  align-items: center;
+  margin-bottom: -1rem; /* The container's section gap is large; tighten it here */
+}
+
+.filter-bar[hidden] {
+  display: none;
+}
+
+.toggle-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  background-color: var(--surface);
+  border: 1px solid var(--primary-darker);
+  border-radius: var(--border-radius-md);
+  padding: 0.25rem;
+}
+
+.toggle-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+  padding: 0 0.5rem 0 0.75rem;
+}
+
+.toggle-btn {
+  padding: 0.45rem 1rem;
+  border: none;
+  border-radius: var(--border-radius-sm);
+  background: transparent;
+  color: var(--font-color);
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.toggle-btn:hover {
+  background-color: rgba(167, 139, 250, 0.15);
+}
+
+.toggle-btn:focus-visible {
+  outline: 2px solid var(--primary-light);
+  outline-offset: 2px;
+}
+
+.toggle-btn.active,
+.toggle-btn[aria-pressed="true"] {
+  background-color: var(--primary);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.toggle-btn.active:hover {
+  background-color: var(--primary-hover);
+}
+
 /* Generic Button Styles */
 .btn {
     border: none;

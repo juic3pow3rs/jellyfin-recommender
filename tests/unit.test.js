@@ -22,11 +22,55 @@ test('index.html loads the vendored copies, not the live sites of the other repo
   for (const f of VENDOR) assert.match(html, new RegExp(`src="js/vendor/${f.replace('.', '\\.')}"`), f);
 });
 
-const loadFindSimilar = () => {
-  const ctx = vm.createContext({ console, Math, JSON, Set, Map, window: {} });
+test('index.html has the Movies/Shows and Watched only/Whole library toggles', () => {
+  const html = read('index.html');
+  assert.match(html, /id="filter-bar"/);
+  for (const v of ['data-type="Movie"', 'data-type="Series"', 'data-scope="watched"', 'data-scope="all"'])
+    assert.ok(html.includes(v), v);
+});
+
+test('Docker setup serves the static app', () => {
+  const dockerfile = read('Dockerfile');
+  assert.match(dockerfile, /FROM nginx/);
+  assert.match(dockerfile, /COPY \. \/usr\/share\/nginx\/html/);
+  assert.match(read('docker-compose.yml'), /build: \./);
+  assert.ok(fs.existsSync(path.join(ROOT, '.dockerignore')));
+});
+
+const loadFindSimilar = (extra = {}) => {
+  const ctx = vm.createContext({ console, Math, JSON, Set, Map, window: {}, ...extra });
   vm.runInContext(read('findSimilar.js'), ctx, { filename: 'findSimilar.js' });
   return ctx;
 };
+
+test('filterByContentType keeps only the selected type', () => {
+  const ctx = loadFindSimilar();
+  const filter = vm.runInContext('filterByContentType', ctx);
+  const items = [{ Id: 'a', Type: 'Movie' }, { Id: 'b', Type: 'Series' }, { Id: 'c' }, { Id: 'd', Type: 'Episode' }];
+  assert.equal(JSON.stringify(filter(items, 'Movie').map(i => i.Id)), '["a"]');
+  assert.equal(JSON.stringify(filter(items, 'Series').map(i => i.Id)), '["b"]');
+  assert.equal(filter(null, 'Movie').length, 0);
+});
+
+test('findSimilar: watched items are excluded by default and kept with includePlayed (whole-library scope)', () => {
+  const ctx = loadFindSimilar({ jellyfin: { makeImageUrl: () => 'img' } });
+  const findSimilar = vm.runInContext('findSimilar', ctx);
+  const reset = vm.runInContext('resetRecommendationState', ctx);
+  const mk = (Id, played) => ({ Id, Name: 'Item ' + Id, Type: 'Movie', Genres: ['Action'], ProductionYear: 2000, CommunityRating: 8, UserData: { Played: played } });
+  const anchors = [mk('p1', true)];
+  const candidates = [mk('u1', false), mk('p2', true)];
+
+  reset();
+  const defIds = findSimilar(anchors, candidates, 1, 5, false).flatMap(g => g.Recommendations.map(r => r.Id));
+  assert.ok(defIds.includes('u1'));
+  assert.ok(!defIds.includes('p2'), 'a played item must not be recommended by default');
+  assert.ok(vm.runInContext('usedWatchedIds.size', ctx) > 0);
+
+  reset();
+  assert.equal(vm.runInContext('usedWatchedIds.size', ctx), 0, 'resetRecommendationState clears the anchors');
+  const allIds = findSimilar(anchors, candidates, 1, 5, false, true).flatMap(g => g.Recommendations.map(r => r.Id));
+  assert.ok(allIds.includes('u1') && allIds.includes('p2'), 'includePlayed keeps played items as candidates');
+});
 
 test('tokenizeName: same tokens as before for ASCII titles, accents and other scripts kept (CR-11)', () => {
   const ctx = loadFindSimilar();

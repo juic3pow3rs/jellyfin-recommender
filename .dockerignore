@@ -1,0 +1,6 @@
+.git
+.github
+tests
+Dockerfile
+docker-compose.yml
+.dockerignore

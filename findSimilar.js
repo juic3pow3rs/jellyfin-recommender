@@ -22,6 +22,18 @@ const POSTER_WIDTH = 360, POSTER_HEIGHT = 540, POSTER_QUALITY = 80;
 const usedWatchedIds = new Set();   // Track already tried watched Contents
 const usedUnwatchedIds = new Set(); // Track recommended unwatched Contents to avoid duplicates
 
+// The Movies/Shows toggle filters the lists when they are built (the library cache is shared with CoverMaker,
+// so the type is not restricted at load time)
+function filterByContentType(items, type) {
+  return (items || []).filter(item => item?.Type === type);
+}
+
+// Clears the anchor/candidate memory so a new run (other type or scope, another user) starts from scratch
+function resetRecommendationState() {
+  usedWatchedIds.clear();
+  usedUnwatchedIds.clear();
+}
+
 
 function buildRarityMap(allContents) {
   const genreFreq = {};
@@ -212,14 +224,14 @@ function calculateSimilarity(targetContent, currentContent, rarityProfile) {
 }
 
 
-function findSimilarForOne(targetContent, unwatchedContents, limit = 10, allSimilarities = [], rarityProfile) {
+function findSimilarForOne(targetContent, unwatchedContents, limit = 10, allSimilarities = [], rarityProfile, includePlayed = false) {
   const similarities = [];
   // Use a Set for efficient checking of already recommended Contents
   const recommendedContentIds = new Set(allSimilarities.flatMap(group => group.similarContents.map(s => s.Content.Id)));
 
   for (const Content of unwatchedContents) {
-    // Skip if already watched or already in recommendations
-    if (Content.Id === targetContent.Id || Content.UserData?.Played || recommendedContentIds.has(Content.Id)) {
+    // Skip if already watched (unless the whole library is the candidate pool) or already in recommendations
+    if (Content.Id === targetContent.Id || (!includePlayed && Content.UserData?.Played) || recommendedContentIds.has(Content.Id)) {
       continue;
     }
 
@@ -328,11 +340,13 @@ function computeTasteSimilarity(Content, tasteProfile, options = {}) {
 }
 
 // --- Main Execution Logic ---
-function findSimilar(watchedContents, unwatchedContents, numberOfRandomWatchedContents = 10, numberOfSimilarContentsPerWatched = 7, useSingleAppearance = true) {
+// includePlayed: "Whole library" scope passes the entire library as candidates (already watched items included);
+// the default keeps only the unplayed ones as candidates
+function findSimilar(watchedContents, unwatchedContents, numberOfRandomWatchedContents = 10, numberOfSimilarContentsPerWatched = 7, useSingleAppearance = true, includePlayed = false) {
   try {
-    const trulyUnwatchedContents = unwatchedContents.filter(
-      m => !(m.UserData?.Played)
-    );
+    const trulyUnwatchedContents = includePlayed
+      ? [...unwatchedContents]
+      : unwatchedContents.filter(m => !(m.UserData?.Played));
 
     if (trulyUnwatchedContents.length === 0) {
       console.log("No truly unwatched Contents available after filtering.");
@@ -368,7 +382,8 @@ function findSimilar(watchedContents, unwatchedContents, numberOfRandomWatchedCo
         availableUnwatched,
         numberOfSimilarContentsPerWatched,
         allSimilarities, // Pass current recommendations to avoid duplicates
-        rarityProfile
+        rarityProfile,
+        includePlayed
       );
 
       if (similarContents.length > 0) {

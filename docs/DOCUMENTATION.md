@@ -19,12 +19,13 @@ Published at `https://jeffersoncgo.github.io/content-recommender/`. No build, no
 
 | File | Role |
 |---|---|
-| `index.html` | Header, login window (`#loginBox`), recommendations container and script loading |
+| `index.html` | Header, login window (`#loginBox`), filter toggles (`#filter-bar`), recommendations container and script loading |
 | `style.css` | Dark theme, responsive card grid (≤ 768 px and ≤ 480 px) |
-| `script.js` | Login, collecting played/unplayed items, rendering the cards |
-| `findSimilar.js` | Similarity and taste algorithms |
+| `script.js` | Login, filter state (type/scope), collecting played/unplayed/all items, rendering the cards |
+| `findSimilar.js` | Similarity and taste algorithms, type filter, anchor/candidate state |
 | `script_infinity_scroll.js` | Fetches more "Because you watched" groups when nearing the end of the page (one batch at a time) |
 | `js/vendor/` | Copies of the dependencies (below) |
+| `Dockerfile`, `docker-compose.yml`, `.dockerignore` | Serve the static app with nginx (port 8080) |
 
 ### Dependencies (copies in `js/vendor/`, since 2026-10-23)
 
@@ -58,12 +59,26 @@ page load
 InitializeJellyfin(explicitLogin)                  explicitLogin = Connect button
  └─ new Jellyfin(server, user, pass, events, true, { preferCredentials: explicitLogin })
      │                                             (CoverMaker's class: token or password login, getLibraries, cache)
-     ├─ onLoginSuccess → forgetSavedPassword()     deletes the old username/password; shows "Sign out"
+     ├─ onLoginSuccess → forgetSavedPassword()     deletes the old username/password; shows "Sign out" and #filter-bar
      └─ Sign out → jellyfin.logout() + reload      POST /Sessions/Logout, deletes the saved session
      └─ onLibraryLoad
          ├─ updateTestesSugestions(true)           "Based on Your General Watched Content" section
          └─ updateRecommendations()                "Because you watched" section (3 anchors × 6 items)
 ```
+
+Filter toggles (`#filter-bar`, visible after login, persisted in `localStorage` as `recommender.type` /
+`recommender.scope`):
+
+- **Type** — `Movie` (Movies) or `Series` (Shows): applied with `filterByContentType` when the lists are built
+  (`getList`), not at load time (shared library cache).
+- **Scope** — `watched` (default): played items as anchors, unplayed as candidates; `all`: the whole library as
+  both anchors and candidates (`findSimilar(…, includePlayed = true)` keeps already watched candidates, and the
+  section titles become "Similar to …" / "Based on Your Whole Library").
+
+Changing a toggle calls `refreshRecommendations()`: resets the anchor/candidate state
+(`resetRecommendationState`), clears the cached lists and both sections, then recomputes them.
+
+`getList(…, 'Played'|'Unplayed'|'All')` sets `searchParams.PlayedOnly/UnplayedOnly` (`'All'` clears both),
 
 `getList(…, 'Played'|'Unplayed')` sets `searchParams.PlayedOnly/UnplayedOnly`, `limit = 999999` and calls
 `jellyfin.searchItems('', '', {})`, which joins the items of every loaded library and filters with
@@ -74,9 +89,10 @@ Each card opens `${Server.ExternalAddress}/web/#/details?id=<Id>&serverId=<Serve
 
 ## 4. "Because you watched" algorithm (`findSimilar`)
 
-`findSimilar(played, unplayed, anchorCount = 10, perAnchor = 7, useSingleAppearance = true)`
+`findSimilar(played, unplayed, anchorCount = 10, perAnchor = 7, useSingleAppearance = true, includePlayed = false)`
 
-1. Removes from the unplayed list the items that have `UserData.Played`.
+1. Removes from the unplayed list the items that have `UserData.Played` (kept when `includePlayed` is set, i.e. the
+   "Whole library" scope).
 2. **Rarity** of each genre/tag across the whole catalog: `log((N + 1) / (freq + 1))` (IDF style).
 3. Draws a played anchor not used yet (`usedWatchedIds`, global across calls) and scores each candidate:
 
@@ -119,9 +135,10 @@ score      = min(1, (0.65 × genreScore + 0.35 × tagScore) × penalty) × 100
 - In practice (`CR-06`, kept on purpose): the search runs in *lax* mode (adds points per query); `all` with 7 genres
   almost never matches and `between` is not a `SearchEngine` operator (it uses `..`), so **only the minimum rating
   filters**. Fixing this changes the recommendations — it is left for the user to decide, testing on the real library.
-- Recommended types: `Audio`, `Video`, `Book`, `Movie`, `Series` (`RECOMMENDABLE_TYPES` in `script.js`). The filter is
-  applied when the lists are built, not at load time: the library cache is shared with CoverMaker, and loading fewer
-  types here would make each app reload the other's cache on every visit.
+- Recommended types: the Movies/Shows toggle selects `Movie` or `Series` (both in `RECOMMENDABLE_TYPES` in
+  `script.js`, which validates the saved choice). The filter is applied when the lists are built
+  (`filterByContentType` in `findSimilar.js`), not at load time: the library cache is shared with CoverMaker, and
+  loading fewer types here would make each app reload the other's cache on every visit.
 - The "played" status is refreshed on every load (`needsUserData = true`), even with the library coming from the cache.
 
 ## 6. Configuration
@@ -135,12 +152,15 @@ score      = min(1, (0.65 × genreScore + 0.35 × tagScore) × penalty) × 100
 | Items per Load More click | `similarsToShow` |
 | Default image | `noImage` (placehold.co) |
 | Card image size | `POSTER_WIDTH × POSTER_HEIGHT = 360 × 540` (portrait, 2× the card), quality 80, in `findSimilar.js` |
+| Type toggle (Movies/Shows) | `filterState.type`, `localStorage` key `recommender.type` (default `Movie`) |
+| Scope toggle (Watched only/Whole library) | `filterState.scope`, `localStorage` key `recommender.scope` (default `watched`) |
 
 ## 7. Storage
 
 | Where | Key | Content |
 |---|---|---|
 | `localStorage` | `server` | Server address |
+| `localStorage` | `recommender.type` / `recommender.scope` | Filter toggles (Movies/Shows, Watched only/Whole library) |
 | `localStorage` | `jellyfinAuth` | Session `{ server, serverId, userId, token }` (`Jellyfin` class; never the password) |
 | `localStorage` | `username`, `password` | Only from old versions: used once to get the token, then deleted |
 | IndexedDB `pageMemoryDB` | Page URL | `[save]` fields (only the server; username and password are no longer saved) |
@@ -153,8 +173,9 @@ Since CoverMaker and this app are on the same origin (`jeffersoncgo.github.io`),
 ## 8. Tests
 
 `node --test "tests/*.test.js"` (Node 20+): syntax, dependencies in `js/vendor/` present and loaded by `index.html`,
-tokenizer and shuffle. With `cdn` and `CoverMaker` cloned next to it, it also checks that the copies are identical to
-the originals. Runs in CI on every push (`.github/workflows/tests.yml`). Browser tests:
+the filter toggles and the Docker files in `index.html`/repo, tokenizer, shuffle, type filter and the
+`includePlayed` behavior of `findSimilar`. With `cdn` and `CoverMaker` cloned next to it, it also checks that the
+copies are identical to the originals. Runs in CI on every push (`.github/workflows/tests.yml`). Browser tests:
 `CoverMaker/tests/browser/cr_auth.js`.
 
 ## 9. Running locally
@@ -165,4 +186,12 @@ cd content-recommender
 python3 -m http.server 8080    # open http://localhost:8080/
 ```
 
-The browser must reach Jellyfin directly (same network/VPN) and the server must allow CORS for the app's origin.
+Or with Docker (nginx serving the static files, published on port 8080):
+
+```bash
+docker compose up --build
+# or: docker build -t jellyfin-recommender . && docker run -p 8080:80 jellyfin-recommender
+```
+
+The browser must reach Jellyfin directly (same network/VPN) and the server must allow CORS for the app's origin
+(e.g. `http://localhost:8080` in Dashboard → Networking → CORS hosts).

@@ -14,14 +14,16 @@ This project is a web application that leverages your Jellyfin server to recomme
 
 *   **Personalized Recommendations:** Get Content suggestions tailored to your viewing habits.
 *   **Jellyfin Integration:** Connects directly to your Jellyfin server to fetch your library data.
+*   **Movies or Shows:** Toggle the recommendations between movies and shows.
+*   **Watched only or Whole library:** Base the recommendations on your watch history only (recommending just unwatched items) or on the whole library.
 *   **Configurable Similarity:** The `findSimilar.js` file allows you to adjust the weights for different attributes (genres, tags, rating, year, title) to fine-tune the recommendation algorithm.
 *   **User-Friendly Interface:** A clean and intuitive interface to log in to your Jellyfin server and view recommendations.
-*   **Web-Based:** Accessible directly through your web browser without any local installation (via the provided GitHub Pages link).
+*   **Web-Based:** Accessible directly through your web browser without any local installation (via the provided GitHub Pages link or the Docker container).
 
 ## How It Works
 
 1.  **Jellyfin Connection:** The application first prompts you to log in to your Jellyfin server using your server URL, username, and password. Only the session token is kept in the browser (never the password); **Sign out** ends the session.
-2.  **Data Fetching:** Once connected, it fetches your played and unplayed Content libraries.
+2.  **Data Fetching:** Once connected, it fetches your library, filtered to the selected type (movies or shows). The **Watched only / Whole library** toggle decides what the recommendations are based on: only your watched items (candidates are the unwatched ones) or the entire library (already watched items can appear too).
 3.  **Similarity Calculation:** The `findSimilar.js` script calculates a similarity score between your watched Contents and the unwatched ones. This score is based on a weighted combination of:
     *   Genres (rarer genres count more)
     *   Tags
@@ -46,6 +48,7 @@ You can try out the Content Recommender directly on GitHub Pages:
 *   **`script.js`**: The main JavaScript file responsible for handling user interactions, connecting to Jellyfin, processing recommendations, and displaying them.
 *   **`findSimilar.js`**: Contains the core logic for calculating Content similarities and generating recommendations. This is where you can tweak the `WEIGHTS` object to customize the recommendation algorithm.
 *   **`js/vendor/`**: Copies of the shared libraries it uses — Jellyfin API client and window handling from [CoverMaker](https://github.com/jeffersoncgo/CoverMaker), utilities from [cdn](https://github.com/jeffersoncgo/cdn). Kept as copies so a change in those repositories cannot break this app unnoticed.
+*   **`Dockerfile` / `docker-compose.yml` / `.dockerignore`**: Serve the app as a Docker container (nginx, static files only).
 
 ## How to Run Locally (Optional)
 
@@ -70,7 +73,25 @@ While the application is hosted on GitHub Pages, you can also run it locally for
     *   Click the "Connect" button.
 
 4.  **View Recommendations:**
-    Once successfully logged in, the application will fetch your library data and display Content recommendations.
+    Once successfully logged in, the application will fetch your library data and display Content recommendations. Use the toggles at the top to switch between **Movies** and **Shows**, and between **Watched only** and **Whole library**; the choice is remembered for the next visit.
+
+## Run with Docker
+
+The app is a static site, so the container only serves the files — the browser still talks to your Jellyfin server directly.
+
+```bash
+docker compose up --build
+# then open http://localhost:8080
+```
+
+Or without Compose:
+
+```bash
+docker build -t jellyfin-recommender .
+docker run -p 8080:80 jellyfin-recommender
+```
+
+Note: the browser must be able to reach your Jellyfin server, and the app's origin (e.g. `http://localhost:8080`) must be listed in the CORS hosts of the Jellyfin server (Dashboard → Networking).
 
 ## Customization
 
