@@ -149,16 +149,23 @@ score      = min(1, (0.65 × genreScore + 0.35 × tagScore) × penalty) × 100
 
 For extending the library: items **not** in Jellyfin yet, fetched from TMDB (the provider Jellyfin itself uses).
 
-1. Anchors: up to `ContentsToCheck` items of the selected type from the base list that have a `ProviderIds.Tmdb`
-   id (picked with `selectRandomContents`).
-2. For each anchor, TMDB `/{movie|tv}/{tmdbId}/similar` and `/recommendations` (page 1) are fetched
-   (`tmdb.js`, `api_key` = the user's own key from `localStorage.tmdbApiKey`; TMDB allows CORS from the browser).
-   Genre ids are translated to names with `/genre/{movie|tv}/list` (cached per type).
+1. Anchors: up to `ContentsToCheck` items of the selected type from the base list (picked with
+   `selectRandomContents`). Their TMDB id comes from `ProviderIds.Tmdb`; when an anchor has none (old cache,
+   Meilisearch load), it is resolved with a TMDB `/search/{movie|tv}` by title (+ production year), cached per
+   anchor (`resolveAnchorTmdbId`).
+2. For each anchor, TMDB `/{movie|tv}/{tmdbId}/similar` and `/recommendations`, pages 1–3 (`TMDB_PAGES`), are
+   fetched (`tmdb.js`, `api_key` = the user's own v3 key from `localStorage.tmdbApiKey`; TMDB allows CORS from
+   the browser). More pages because page 1 is often full of titles the library already has. Genre ids are
+   translated to names with `/genre/{movie|tv}/list` (cached per type).
 3. Candidates whose TMDB id is already in the library (`buildLibraryTmdbIds` over the whole type-filtered library)
-   are dropped, duplicates across the two endpoints and across anchors are removed.
+   are dropped, duplicates across endpoints/pages/anchors are removed.
 4. The rest is ranked with the same `calculateSimilarity` + `> 15` threshold as in-library recommendations
    (`rankExternalCandidates`) and shown per anchor in `#new-content-container`. Cards carry `ExternalUrl`
    (the TMDB page) instead of a Jellyfin details link. To add such an item, search its title in Jellyfin.
+5. `getExternalRecommendations` also returns `stats` (anchors, anchors with a TMDB id, fetched, excluded,
+   groups); an empty result shows the concrete reason in the section ("already in your library", "could not be
+   matched on TMDB", …) and the counts are logged to the console. The key format is checked up front
+   (`tmdbKeyLooksValid`: 32 hex chars — the v4 Read Access Token is a JWT and does not work as `api_key=`).
 
 ## 6. Configuration
 

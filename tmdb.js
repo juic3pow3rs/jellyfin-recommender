@@ -66,16 +66,50 @@ function buildLibraryTmdbIds(items) {
   return ids;
 }
 
-async function fetchTmdbSimilarForAnchor(anchor, type, apiKey, genreMap) {
-  const tmdbId = anchor?.ProviderIds?.Tmdb;
+const TMDB_PAGES = 3; // pages per endpoint: page 1 is often full of titles the library already has
+const anchorTmdbIdCache = new Map(); // anchor.Id -> tmdb id (or null)
+
+// Anchors usually carry ProviderIds.Tmdb; when they don't (old cache, Meilisearch load), resolve the id
+// through a TMDB title search (with the production year when known)
+async function resolveAnchorTmdbId(anchor, type, apiKey) {
+  if (anchorTmdbIdCache.has(anchor.Id)) return anchorTmdbIdCache.get(anchor.Id);
+  let tmdbId = anchor?.ProviderIds?.Tmdb ? String(anchor.ProviderIds.Tmdb) : null;
+  if (!tmdbId && anchor?.Name) {
+    const kind = type === 'Series' ? 'tv' : 'movie';
+    const yearParam = anchor.ProductionYear
+      ? (type === 'Series' ? `&first_air_date_year=${anchor.ProductionYear}` : `&year=${anchor.ProductionYear}`)
+      : '';
+    try {
+      const data = await tmdbFetch(`/search/${kind}?language=en-US&query=${encodeURIComponent(anchor.Name)}${yearParam}&page=1`, apiKey);
+      const results = data.results || [];
+      if (results.length) {
+        const norm = s => (s || '').toLowerCase();
+        const exact = results.find(r => norm(type === 'Series' ? r.name : r.title) === norm(anchor.Name));
+        const best = exact || [...results].sort((a, b) => (b.popularity || 0) - (a.popularity || 0))[0];
+        tmdbId = String(best.id);
+      }
+    } catch (error) {
+      console.warn(`TMDB search failed for "${anchor.Name}":`, error.message);
+    }
+  }
+  anchorTmdbIdCache.set(anchor.Id, tmdbId);
+  return tmdbId;
+}
+
+async function fetchTmdbSimilarForAnchor(anchor, tmdbId, type, apiKey, genreMap) {
   if (!tmdbId) return [];
   const kind = type === 'Series' ? 'tv' : 'movie';
-  const pages = await Promise.all(['similar', 'recommendations'].map(endpoint =>
-    tmdbFetch(`/${kind}/${tmdbId}/${endpoint}?language=en-US&page=1`, apiKey)
-      .then(data => (data.results || []).map(raw => normalizeTmdbItem(raw, type, genreMap)))
-      .catch(error => { console.warn(`TMDB ${endpoint} failed for ${anchor.Name}:`, error.message); return []; })
-  ));
-  return pages.flat();
+  const requests = [];
+  for (const endpoint of ['similar', 'recommendations'])
+    for (let page = 1; page <= TMDB_PAGES; page++)
+      requests.push(
+        tmdbFetch(`/${kind}/${tmdbId}/${endpoint}?language=en-US&page=${page}`, apiKey)
+          .then(data => (data.results || []).map(raw => normalizeTmdbItem(raw, type, genreMap)))
+          .catch(error => { console.warn(`TMDB ${endpoint} p${page} failed for "${anchor.Name}":`, error.message); return []; })
+      );
+  const pages = await Promise.all(requests);
+  // similar + recommendations (and the pages) overlap: keep one copy of each TMDB id
+  return [...new Map(pages.flat().map(c => [c.TmdbId, c])).values()];
 }
 
 // Same score and threshold (> 15) as findSimilarForOne, against the library anchor
@@ -92,26 +126,30 @@ function rankExternalCandidates(anchor, candidates, rarityProfile, limit = 6) {
 }
 
 // anchors: library items to base on (already type-filtered); libraryItems: the whole library of that type,
-// used to exclude items the user already has
+// used to exclude items the user already has. Returns { groups, stats } — stats say why groups can be empty
 async function getExternalRecommendations(anchors, libraryItems, type, apiKey, { anchorCount = 3, perAnchor = 6 } = {}) {
-  if (!apiKey || !anchors?.length) return [];
+  const stats = { anchors: 0, anchorsWithId: 0, fetched: 0, excluded: 0, groups: 0 };
+  if (!apiKey || !anchors?.length) return { groups: [], stats };
   const genreMap = await tmdbGenreMap(type, apiKey);
   const libraryIds = buildLibraryTmdbIds(libraryItems);
   const rarityProfile = buildRarityMap([...(anchors || []), ...(libraryItems || [])]);
-  const withTmdbId = anchors.filter(a => a?.ProviderIds?.Tmdb);
-  const picked = selectRandomContents(withTmdbId, anchorCount);
+  const picked = selectRandomContents(anchors, anchorCount);
   const usedIds = new Set();
+  stats.anchors = picked.length;
 
   const groups = (await Promise.all(picked.map(async anchor => {
-    const raw = await fetchTmdbSimilarForAnchor(anchor, type, apiKey, genreMap);
-    // similar + recommendations often overlap: keep one copy of each TMDB id
-    const unique = [...new Map(raw.map(c => [c.TmdbId, c])).values()];
-    const fresh = unique.filter(c => !libraryIds.has(c.TmdbId) && !usedIds.has(c.TmdbId));
+    const tmdbId = await resolveAnchorTmdbId(anchor, type, apiKey);
+    if (tmdbId) stats.anchorsWithId++;
+    const raw = await fetchTmdbSimilarForAnchor(anchor, tmdbId, type, apiKey, genreMap);
+    stats.fetched += raw.length;
+    const fresh = raw.filter(c => !libraryIds.has(c.TmdbId) && !usedIds.has(c.TmdbId));
+    stats.excluded += raw.length - fresh.length;
     const recommendations = rankExternalCandidates(anchor, fresh, rarityProfile, perAnchor);
     if (!recommendations.length) return null;
     recommendations.forEach(r => usedIds.add(r.TmdbId));
     return { Name: anchor.Name, Id: anchor.Id, Recommendations: recommendations };
   }))).filter(Boolean);
 
-  return groups;
+  stats.groups = groups.length;
+  return { groups, stats };
 }
