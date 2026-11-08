@@ -17,9 +17,33 @@ function tmdbKeyLooksValid(apiKey) {
 
 const tmdbGenreMaps = {}; // type ('Movie'|'Series') -> { genreId: name }
 
-async function tmdbFetch(path, apiKey) {
+// Rate limiting (developer.themoviedb.org/docs/rate-limiting): the legacy 40 req/10 s limit is gone, but a
+// CDN-level ceiling of roughly 40-50 requests/second per IP remains, and 429 must be respected. Stay below
+// it with a sliding window of at most TMDB_MAX_REQ_PER_SEC requests per second, and on a 429 back off and
+// retry once.
+const TMDB_MAX_REQ_PER_SEC = 40;
+const tmdbReqTimes = [];
+
+async function tmdbThrottle() {
+  for (;;) {
+    const now = Date.now();
+    while (tmdbReqTimes.length && now - tmdbReqTimes[0] >= 1000) tmdbReqTimes.shift();
+    if (tmdbReqTimes.length < TMDB_MAX_REQ_PER_SEC) {
+      tmdbReqTimes.push(now);
+      return;
+    }
+    await new Promise(r => setTimeout(r, 1000 - (now - tmdbReqTimes[0]) + 10));
+  }
+}
+
+async function tmdbFetch(path, apiKey, retried = false) {
+  await tmdbThrottle();
   const sep = path.includes('?') ? '&' : '?';
   const res = await fetch(`${TMDB_API}${path}${sep}api_key=${encodeURIComponent(apiKey)}`);
+  if (res.status === 429 && !retried) {
+    await new Promise(r => setTimeout(r, 2000)); // Too Many Requests: back off, then retry once
+    return tmdbFetch(path, apiKey, true);
+  }
   if (!res.ok) throw new Error(`TMDB responded ${res.status}`);
   return res.json();
 }

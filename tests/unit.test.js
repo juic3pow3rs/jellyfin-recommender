@@ -28,6 +28,14 @@ test('index.html has the filter toggles and the external-recommendation controls
   for (const v of ['data-type="Movie"', 'data-type="Series"', 'data-scope="watched"', 'data-scope="all"', 'data-new="off"', 'data-new="on"', 'id="tmdbApiKey"', 'id="new-content-container"', 'id="new-content-divider"', 'id="shuffleBtn"'])
     assert.ok(html.includes(v), v);
   assert.match(html, /src="tmdb\.js"/);
+  // Required by the TMDB API terms of use (attribution)
+  assert.ok(html.includes('uses the'), 'TMDB attribution notice missing');
+  assert.ok(/TMDB<\/a> API but is not endorsed or certified by TMDB/.test(html), 'TMDB attribution text missing');
+});
+
+test('external section size and TMDB rate-limit cap are configured in the sources', () => {
+  assert.ok(read('script.js').includes('NEW_CONTENT_ANCHORS = 12'), 'NEW_CONTENT_ANCHORS = 12 missing');
+  assert.ok(read('tmdb.js').includes('TMDB_MAX_REQ_PER_SEC = 40'), 'TMDB_MAX_REQ_PER_SEC = 40 missing (stay below TMDB ~50 rps ceiling)');
 });
 
 test('Docker setup serves the static app', () => {
@@ -73,12 +81,29 @@ test('findSimilar: watched items are excluded by default and kept with includePl
   assert.ok(allIds.includes('u1') && allIds.includes('p2'), 'includePlayed keeps played items as candidates');
 });
 
-const loadTmdb = (fetchMock) => {
-  const ctx = vm.createContext({ console, fetch: fetchMock, window: {} });
+const loadTmdb = (fetchMock, extra = {}) => {
+  const ctx = vm.createContext({ console, fetch: fetchMock, window: {}, ...extra });
   vm.runInContext(read('findSimilar.js'), ctx, { filename: 'findSimilar.js' });
   vm.runInContext(read('tmdb.js'), ctx, { filename: 'tmdb.js' });
   return ctx;
 };
+
+test('tmdb.js: tmdbFetch retries once on HTTP 429 and still throws on other errors', async () => {
+  let calls = 0;
+  const fetchMock = async () => {
+    calls++;
+    return calls === 1 ? { ok: false, status: 429 } : { ok: true, json: async () => ({ ok: 1 }) };
+  };
+  const ctx = loadTmdb(fetchMock, { setTimeout: (cb) => cb() });
+  const tmdbFetchFn = vm.runInContext('tmdbFetch', ctx);
+  const data = await tmdbFetchFn('/configuration', 'KEY');
+  assert.equal(calls, 2, '429 -> one retry');
+  assert.equal(JSON.stringify(data), '{"ok":1}');
+
+  const ctx401 = loadTmdb(async () => ({ ok: false, status: 401 }), { setTimeout: (cb) => cb() });
+  const tmdbFetch401 = vm.runInContext('tmdbFetch', ctx401);
+  await assert.rejects(tmdbFetch401('/configuration', 'BAD'), /TMDB responded 401/);
+});
 
 test('tmdb.js: normalizeTmdbItem shapes movies and shows like library items', () => {
   const ctx = loadTmdb(async () => ({ ok: true, json: async () => ({}) }));
