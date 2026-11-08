@@ -227,6 +227,37 @@ body {
   box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.3);
 }
 
+/* Shuffle button (re-rolls the anchor movies/shows) */
+.shuffle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 1rem;
+  border: 1px solid var(--primary-darker);
+  border-radius: var(--border-radius-md);
+  background: var(--surface);
+  color: var(--font-color);
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.shuffle-btn:hover {
+  background-color: var(--primary);
+  border-color: var(--primary);
+}
+
+.shuffle-btn:focus-visible {
+  outline: 2px solid var(--primary-light);
+  outline-offset: 2px;
+}
+
+.shuffle-btn[inactive] {
+  opacity: 0.5;
+  cursor: wait;
+}
+
 /* Generic Button Styles */
 .btn {
     border: none;

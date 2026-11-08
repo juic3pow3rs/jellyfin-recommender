@@ -84,6 +84,10 @@ Filter toggles (`#filter-bar`, visible after login, persisted in `localStorage` 
 Changing a toggle (or the TMDB key) calls `refreshRecommendations()`: resets the anchor/candidate state
 (`resetRecommendationState`), clears the cached lists and the sections, then recomputes them.
 
+The **Shuffle** button (`#shuffleBtn`, in the filter bar) does the same, so `selectRandomContents` picks
+different anchors — for the in-library "Because you watched" groups and the external "New to library" ones
+alike. It is disabled while a recompute is running (`[inactive]`).
+
 `getList(…, 'Played'|'Unplayed'|'All')` sets `searchParams.PlayedOnly/UnplayedOnly` (`'All'` clears both),
 
 `getList(…, 'Played'|'Unplayed')` sets `searchParams.PlayedOnly/UnplayedOnly`, `limit = 999999` and calls
