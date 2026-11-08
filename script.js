@@ -20,6 +20,7 @@ const noImage = "https://placehold.co/200x280/808080/FFFFFF?text=No+Image"
 // --- Filter state: Movies/Shows, Watched only/Whole library, New-to-library (all persisted) ---
 const filterBar = document.getElementById('filter-bar');
 const newContentContainer = document.getElementById('new-content-container');
+const newContentDivider = document.getElementById('new-content-divider');
 const tmdbKeyInput = document.getElementById('tmdbApiKey');
 const filterState = {
   type: localStorage.getItem('recommender.type') || 'Movie',
@@ -588,6 +589,8 @@ tmdbKeyInput?.addEventListener('change', () => {
 async function updateNewContent() {
   if (!newContentContainer) return;
   newContentContainer.innerHTML = '';
+  // The divider marks where the external ("new") recommendations end and the in-library ones begin
+  if (newContentDivider) newContentDivider.hidden = filterState.newContent !== 'on';
   if (filterState.newContent !== 'on') return;
 
   const apiKey = localStorage.getItem('tmdbApiKey') || '';

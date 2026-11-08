@@ -77,7 +77,9 @@ Filter toggles (`#filter-bar`, visible after login, persisted in `localStorage` 
   both anchors and candidates (`findSimilar(…, includePlayed = true)` keeps already watched candidates, and the
   section titles become "Similar to …" / "Based on Your Whole Library").
 - **New to library** — `off` (default) / `on`: with `on` and a TMDB API key set, an extra section
-  (`#new-content-container`) shows recommendations **outside** the library (see §5b).
+  (`#new-content-container`) shows recommendations **outside** the library (see §5b), followed by an
+  "In your library" divider (`#new-content-divider`, visible only while the toggle is on) that separates
+  it from the in-library sections below.
 
 Changing a toggle (or the TMDB key) calls `refreshRecommendations()`: resets the anchor/candidate state
 (`resetRecommendationState`), clears the cached lists and the sections, then recomputes them.
