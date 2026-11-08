@@ -25,7 +25,7 @@ test('index.html loads the vendored copies, not the live sites of the other repo
 test('index.html has the filter toggles and the external-recommendation controls', () => {
   const html = read('index.html');
   assert.match(html, /id="filter-bar"/);
-  for (const v of ['data-type="Movie"', 'data-type="Series"', 'data-scope="watched"', 'data-scope="all"', 'data-new="off"', 'data-new="on"', 'id="tmdbApiKey"', 'id="new-content-container"'])
+  for (const v of ['data-type="Movie"', 'data-type="Series"', 'data-scope="watched"', 'data-scope="all"', 'data-new="off"', 'data-new="on"', 'id="tmdbApiKey"', 'id="new-content-container"', 'id="new-content-divider"'])
     assert.ok(html.includes(v), v);
   assert.match(html, /src="tmdb\.js"/);
 });

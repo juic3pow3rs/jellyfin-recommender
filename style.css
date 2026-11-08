@@ -403,6 +403,29 @@ button.load-more-btn:disabled {
   transition: var(--transition-medium);
 }
 
+/* Divider between the "New to your library" (external) and the in-library sections */
+.section-divider {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.section-divider[hidden] {
+  display: none;
+}
+
+.section-divider::before,
+.section-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--primary-darker);
+}
+
 /* Status Messages */
 .loading-message,
 .no-results-message {
