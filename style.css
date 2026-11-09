@@ -434,6 +434,14 @@ button.load-more-btn:disabled {
   transition: var(--transition-medium);
 }
 
+/* Sub-headings inside the "Upcoming & missing" section */
+.upcoming-subheading {
+  font-size: 1.1em;
+  font-weight: 600;
+  color: var(--primary-light);
+  margin: 1.5rem 0 -0.5rem 0;
+}
+
 /* Divider between the "New to your library" (external) and the in-library sections */
 .section-divider {
   display: flex;

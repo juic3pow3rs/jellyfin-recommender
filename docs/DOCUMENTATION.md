@@ -65,7 +65,8 @@ InitializeJellyfin(explicitLogin)                  explicitLogin = Connect butto
      └─ onLibraryLoad
          ├─ updateTestesSugestions(true)           "Based on Your General Watched Content" section
          ├─ updateRecommendations()                "Because you watched" section (3 anchors × 6 items)
-         └─ updateNewContent()                     "New to your library" section (only when enabled)
+         ├─ updateNewContent()                     "New to your library" section (only when enabled)
+         └─ updateUpcoming()                       "Upcoming & missing" section (only when enabled)
 ```
 
 Filter toggles (`#filter-bar`, visible after login, persisted in `localStorage` as `recommender.type` /
@@ -77,9 +78,10 @@ Filter toggles (`#filter-bar`, visible after login, persisted in `localStorage` 
   both anchors and candidates (`findSimilar(…, includePlayed = true)` keeps already watched candidates, and the
   section titles become "Similar to …" / "Based on Your Whole Library").
 - **New to library** — `off` (default) / `on`: with `on` and a TMDB API key set, an extra section
-  (`#new-content-container`) shows recommendations **outside** the library (see §5b), followed by an
-  "In your library" divider (`#new-content-divider`, visible only while the toggle is on) that separates
-  it from the in-library sections below.
+  (`#new-content-container`) shows recommendations **outside** the library (see §5b).
+- **Upcoming** — `off` (default) / `on`: with `on` and a TMDB key set, `#upcoming-container` shows missing /
+  upcoming content (see §5c). The "In your library" divider (`#new-content-divider`) is visible while either
+  external toggle is on.
 
 Changing a toggle (or the TMDB key) calls `refreshRecommendations()`: resets the anchor/candidate state
 (`resetRecommendationState`), clears the cached lists and the sections, then recomputes them.
@@ -170,6 +172,29 @@ For extending the library: items **not** in Jellyfin yet, fetched from TMDB (the
    once. 12 anchors × 6 requests ≈ 72 requests ≈ ~2 s. Per the
    [API terms of use](https://www.themoviedb.org/api-terms-of-use) (non-commercial use requires attribution),
    the footer shows "This product uses the TMDB API but is not endorsed or certified by TMDB."
+
+### 5c. Upcoming & missing (`tmdb.js` `getUpcomingAndMissing`, `#upcoming-container`)
+
+Independent of the Movies/Shows toggle — it looks at **both** movies and series of the library. All TMDB calls
+go through the throttled `tmdbFetch` (≤ 40 req/s, 429 → retry once).
+
+1. **Missing / upcoming seasons:** one raw Jellyfin call
+   (`GET /Users/{userId}/Items?IncludeItemTypes=Season&Recursive=true`, `getOwnedSeasonsBySeries` in
+   `script.js`) maps series id → owned season numbers. Per library series (max `UPCOMING_MAX_SERIES = 40`),
+   TMDB `/tv/{tmdbId}` lists all seasons (season 0 "Specials" ignored); seasons not owned become cards
+   "Show — Season N" with note "aired <date>" / "releases <date>", linking to the TMDB season page.
+2. **Sequels / collection parts:** per library movie (max `UPCOMING_MAX_MOVIES = 20`), TMDB
+   `/movie/{id}` → `belongs_to_collection` → `/collection/{id}` parts; parts already in the library
+   (`isInLibrary`) are dropped, the rest become "Collection: Title" cards with a released/releases date note.
+   (Standalone sequels outside a TMDB collection cannot be detected — TMDB data limitation.)
+3. **Favorite actors / directors:** credits (`/{movie|tv}/{id}/credits`) of up to `UPCOMING_MAX_CREDIT_ANCHORS = 8`
+   watched titles are aggregated; the top `UPCOMING_MAX_ACTORS = 5` actors and `UPCOMING_MAX_DIRECTORS = 3`
+   directors get `/person/{id}/combined_credits`, filtered against the library, noted "with/by <name> ·
+   released/releases <date>", ranked by rating/popularity (12 cards each).
+4. **Upcoming releases:** all of the above with a future release/air date, in one section (max 18 cards).
+
+Cards show the note line under the year (`createContentCard` renders `Content.note`). Request budget per load:
+≈ 40 + 2×20 + 8 + 8 ≈ 96 TMDB requests ≈ ~2.5 s at the throttle cap.
 3. Candidates already in the library are dropped: by TMDB id (`buildLibraryTmdbIds`) **and** by normalized
    title + production year (`buildLibraryTitleIndex` / `isInLibrary`), so library items without a `Tmdb`
    provider id still exclude their title. Same title with a distant year is a remake — a different TMDB item —
@@ -196,6 +221,8 @@ For extending the library: items **not** in Jellyfin yet, fetched from TMDB (the
 | Type toggle (Movies/Shows) | `filterState.type`, `localStorage` key `recommender.type` (default `Movie`) |
 | Scope toggle (Watched only/Whole library) | `filterState.scope`, `localStorage` key `recommender.scope` (default `watched`) |
 | New-to-library toggle | `filterState.newContent`, `localStorage` key `recommender.newContent` (default `off`) |
+| Upcoming & missing toggle | `filterState.upcoming`, `localStorage` key `recommender.upcoming` (default `off`) |
+| External anchors (New to library) | `NEW_CONTENT_ANCHORS = 12` in `script.js` |
 | TMDB API key (external recommendations) | `localStorage` key `tmdbApiKey`, field `#tmdbApiKey` |
 
 ## 7. Storage
@@ -203,7 +230,7 @@ For extending the library: items **not** in Jellyfin yet, fetched from TMDB (the
 | Where | Key | Content |
 |---|---|---|
 | `localStorage` | `server` | Server address |
-| `localStorage` | `recommender.type` / `recommender.scope` / `recommender.newContent` | Filter toggles (Movies/Shows, Watched only/Whole library, New to library) |
+| `localStorage` | `recommender.type` / `recommender.scope` / `recommender.newContent` / `recommender.upcoming` | Filter toggles (Movies/Shows, Watched only/Whole library, New to library, Upcoming) |
 | `localStorage` | `tmdbApiKey` | TMDB API key for external recommendations (sent only to `api.themoviedb.org`) |
 | `localStorage` | `jellyfinAuth` | Session `{ server, serverId, userId, token }` (`Jellyfin` class; never the password) |
 | `localStorage` | `username`, `password` | Only from old versions: used once to get the token, then deleted |

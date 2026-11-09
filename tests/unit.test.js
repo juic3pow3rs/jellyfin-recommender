@@ -25,7 +25,7 @@ test('index.html loads the vendored copies, not the live sites of the other repo
 test('index.html has the filter toggles and the external-recommendation controls', () => {
   const html = read('index.html');
   assert.match(html, /id="filter-bar"/);
-  for (const v of ['data-type="Movie"', 'data-type="Series"', 'data-scope="watched"', 'data-scope="all"', 'data-new="off"', 'data-new="on"', 'id="tmdbApiKey"', 'id="new-content-container"', 'id="new-content-divider"', 'id="shuffleBtn"'])
+  for (const v of ['data-type="Movie"', 'data-type="Series"', 'data-scope="watched"', 'data-scope="all"', 'data-new="off"', 'data-new="on"', 'id="tmdbApiKey"', 'id="new-content-container"', 'id="new-content-divider"', 'id="shuffleBtn"', 'id="upcoming-container"', 'data-up="off"', 'data-up="on"'])
     assert.ok(html.includes(v), v);
   assert.match(html, /src="tmdb\.js"/);
   // Required by the TMDB API terms of use (attribution)
@@ -117,6 +117,7 @@ test('tmdb.js: normalizeTmdbItem shapes movies and shows like library items', ()
   assert.equal(movie.ProductionYear, 2010);
   assert.equal(movie.ImageUrl, 'https://image.tmdb.org/t/p/w342/p.jpg');
   assert.equal(movie.ExternalUrl, 'https://www.themoviedb.org/movie/27205');
+  assert.equal(movie.ReleaseDate, '2010-07-16');
   const show = normalize({ id: 1399, name: 'Game of Thrones', genre_ids: [18], vote_average: 8.4, first_air_date: '2011-04-17', poster_path: null }, 'Series', { 18: 'Drama' });
   assert.equal(show.ExternalUrl, 'https://www.themoviedb.org/tv/1399');
   assert.equal(show.ProductionYear, 2011);
@@ -203,6 +204,73 @@ test('tmdb.js: library items without a TMDB id still exclude their title from th
   assert.ok(ids.includes('8'), 'same title, different year (remake) -> kept');
   assert.ok(ids.includes('9'), 'unrelated fresh title -> kept');
   assert.ok(stats.excluded >= 1);
+});
+
+test('tmdb.js: getUpcomingAndMissing finds missing seasons, sequels, favorite people and upcoming dates', async () => {
+  const genreList = { genres: [{ id: 28, name: 'Action' }] };
+  const tvDetails = { poster_path: '/tv.jpg', seasons: [
+    { season_number: 0, name: 'Specials', air_date: '2019-01-01', episode_count: 5 },
+    { season_number: 1, air_date: '2020-01-01', episode_count: 10 },
+    { season_number: 2, air_date: '2021-01-01', episode_count: 10 },
+    { season_number: 3, air_date: '2022-05-01', episode_count: 8 },
+    { season_number: 4, air_date: '2099-01-01', episode_count: 8 }
+  ] };
+  const movieDetails = { belongs_to_collection: { id: 999 } };
+  const collection = { name: 'Anchor Collection', parts: [
+    { id: 100, title: 'Anchor', release_date: '2010-01-01', vote_average: 8, popularity: 90, genre_ids: [28], poster_path: '/a.jpg' },
+    { id: 101, title: 'Anchor Part 2', release_date: '2011-01-01', vote_average: 7.5, popularity: 60, genre_ids: [28] },
+    { id: 102, title: 'Anchor Part 3', release_date: '2099-06-01', vote_average: 0, popularity: 10, genre_ids: [28] }
+  ] };
+  const credits = { cast: [{ id: 55, name: 'Star Actor' }], crew: [{ id: 66, name: 'Top Director', job: 'Director' }] };
+  const person55 = { cast: [{ id: 201, media_type: 'movie', title: 'Actor Movie', release_date: '2015-01-01', vote_average: 8, popularity: 50, genre_ids: [28], poster_path: '/p.jpg' }], crew: [] };
+  const person66 = { cast: [], crew: [{ id: 202, media_type: 'movie', title: 'Director Movie', release_date: '2099-03-01', vote_average: 0, popularity: 5, genre_ids: [28] }] };
+  const fetchMock = async (url) => {
+    const json = async () => {
+      if (url.includes('/genre/')) return genreList;
+      if (url.includes('/tv/300')) return tvDetails;
+      if (url.includes('/movie/100/credits')) return credits;
+      if (url.includes('/movie/100?')) return movieDetails;
+      if (url.includes('/collection/999')) return collection;
+      if (url.includes('/person/55/')) return person55;
+      if (url.includes('/person/66/')) return person66;
+      throw new Error('unexpected ' + url);
+    };
+    return { ok: true, json };
+  };
+  const ctx = loadTmdb(fetchMock, { setTimeout: (cb) => cb() });
+  const getUp = vm.runInContext('getUpcomingAndMissing', ctx);
+  const series = [{ Id: 's1', Name: 'My Show', Type: 'Series', ProviderIds: { Tmdb: '300' } }];
+  const movie = { Id: 'm1', Name: 'Anchor', Type: 'Movie', ProviderIds: { Tmdb: '100' }, UserData: { Played: true } };
+  const ownedSeasons = new Map([['s1', new Set([1, 2])]]);
+  const sections = await getUp({ series, movies: [movie], watchedAnchors: [movie], ownedSeasons, libraryItems: [series[0], movie], apiKey: 'KEY' });
+  const headings = sections.map(s => s.heading);
+
+  const seasons = sections.find(s => s.heading.includes('seasons'));
+  assert.ok(seasons, 'seasons section present');
+  const seasonNames = seasons.items.map(i => i.Name).join(' | ');
+  assert.ok(seasonNames.includes('Season 3') && seasonNames.includes('Season 4'), seasonNames);
+  assert.ok(!seasonNames.includes('Season 1') && !seasonNames.includes('Specials'), 'owned seasons and specials excluded');
+  assert.ok(seasons.items.find(i => i.Name.includes('Season 4')).note.includes('releases 2099-01-01'));
+  assert.ok(seasons.items.find(i => i.Name.includes('Season 3')).note.includes('aired 2022-05-01'));
+  assert.ok(seasons.items[0].ExternalUrl.includes('/tv/300/season/'));
+
+  const sequels = sections.find(s => s.heading.includes('Sequels'));
+  assert.ok(sequels, 'sequels section present');
+  const sequelNames = sequels.items.map(i => i.Name).join(' | ');
+  assert.ok(!sequels.items.some(i => i.Name === 'Anchor Collection: Anchor'), 'owned part (tmdb id in library) excluded');
+  assert.ok(sequelNames.includes('Anchor Part 2') && sequelNames.includes('Anchor Part 3'), sequelNames);
+
+  const actors = sections.find(s => s.heading.includes('actors'));
+  assert.ok(actors && actors.items.some(i => i.Name === 'Actor Movie' && i.note.includes('with Star Actor')), 'actor works with note');
+  const directors = sections.find(s => s.heading.includes('directors'));
+  assert.ok(directors && directors.items.some(i => i.Name === 'Director Movie' && i.note.includes('by Top Director')), 'director works with note');
+
+  const upcoming = sections.find(s => s.heading === 'Upcoming releases');
+  assert.ok(upcoming, 'upcoming section present');
+  const upNames = upcoming.items.map(i => i.Name).join(' | ');
+  assert.ok(upNames.includes('Season 4') && upNames.includes('Anchor Part 3') && upNames.includes('Director Movie'), upNames);
+  assert.ok(!upNames.includes('Season 3') && !upNames.includes('Anchor Part 2') && !upNames.includes('Actor Movie'), 'only future dates in upcoming');
+  assert.ok(headings.length >= 5);
 });
 
 test('tmdb.js: anchors without a Tmdb provider id are resolved through a TMDB title search', async () => {

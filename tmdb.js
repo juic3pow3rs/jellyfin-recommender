@@ -75,6 +75,8 @@ function normalizeTmdbItem(raw, type, genreMap) {
     Genres: (raw.genre_ids || []).map(id => genreMap[id]).filter(Boolean),
     CommunityRating: typeof raw.vote_average === 'number' ? raw.vote_average : null,
     ProductionYear: tmdbYear(isMovie ? raw.release_date : raw.first_air_date),
+    ReleaseDate: isMovie ? (raw.release_date || null) : (raw.first_air_date || null),
+    Popularity: typeof raw.popularity === 'number' ? raw.popularity : null,
     ImageUrl: raw.poster_path ? `${TMDB_IMAGE}${raw.poster_path}` : undefined,
     ExternalUrl: `https://www.themoviedb.org/${kind}/${raw.id}`
   };
@@ -209,4 +211,156 @@ async function getExternalRecommendations(anchors, libraryItems, type, apiKey, {
 
   stats.groups = groups.length;
   return { groups, stats };
+}
+
+// ======================
+// Upcoming & missing: seasons, sequels, favorite people (all via TMDB, all rate-limited by tmdbFetch)
+// ======================
+const UPCOMING_MAX_SERIES = 40;        // tv-details requests for season completeness
+const UPCOMING_MAX_MOVIES = 20;        // movie-details + collection requests for sequels
+const UPCOMING_MAX_CREDIT_ANCHORS = 8; // watched titles whose credits build the favorite people
+const UPCOMING_MAX_ACTORS = 5;
+const UPCOMING_MAX_DIRECTORS = 3;
+
+// TMDB tv details: every season (season 0 = specials is ignored) with its air date
+async function tmdbTvDetails(tmdbId, apiKey) {
+  const data = await tmdbFetch(`/tv/${tmdbId}?language=en-US`, apiKey);
+  const seasons = (data.seasons || [])
+    .filter(s => s.season_number >= 1 && (s.episode_count > 0 || s.air_date))
+    .map(s => ({
+      seasonNumber: s.season_number,
+      name: s.name || `Season ${s.season_number}`,
+      airDate: s.air_date || null,
+      episodeCount: s.episode_count || 0
+    }));
+  return { seasons, posterPath: data.poster_path || null };
+}
+
+// TMDB movie details: the collection it belongs to (for "part x" sequels)
+async function tmdbMovieCollectionId(tmdbId, apiKey) {
+  const data = await tmdbFetch(`/movie/${tmdbId}?language=en-US`, apiKey);
+  return data.belongs_to_collection?.id ? String(data.belongs_to_collection.id) : null;
+}
+
+async function tmdbCollection(collectionId, apiKey, genreMap) {
+  const data = await tmdbFetch(`/collection/${collectionId}?language=en-US`, apiKey);
+  return { name: data.name || 'Collection', parts: (data.parts || []).map(p => normalizeTmdbItem(p, 'Movie', genreMap)) };
+}
+
+// Top cast + directors of one title
+async function tmdbCredits(tmdbId, type, apiKey) {
+  const kind = type === 'Series' ? 'tv' : 'movie';
+  const data = await tmdbFetch(`/${kind}/${tmdbId}/credits?language=en-US`, apiKey);
+  return {
+    cast: (data.cast || []).slice(0, 5).map(c => ({ id: c.id, name: c.name })),
+    directors: (data.crew || []).filter(c => c.job === 'Director').map(c => ({ id: c.id, name: c.name }))
+  };
+}
+
+// All movie/tv works of a person (combined credits, deduped)
+async function tmdbPersonWorks(personId, apiKey, genreMap) {
+  const data = await tmdbFetch(`/person/${personId}/combined_credits?language=en-US`, apiKey);
+  const seen = new Map();
+  for (const c of [...(data.cast || []), ...(data.crew || [])]) {
+    if (c.media_type !== 'movie' && c.media_type !== 'tv') continue;
+    if (!seen.has(c.id)) seen.set(c.id, normalizeTmdbItem(c, c.media_type === 'tv' ? 'Series' : 'Movie', genreMap));
+  }
+  return [...seen.values()];
+}
+
+// Builds the "Upcoming & missing" sections. ownedSeasons: Map seriesId -> Set(seasonNumber) from Jellyfin.
+// Returns [{ heading, items }] where items are card-shaped (Name, ExternalUrl, note, …).
+async function getUpcomingAndMissing({ series = [], movies = [], watchedAnchors = [], ownedSeasons, libraryItems = [], apiKey }) {
+  if (!apiKey) return [];
+  const genreMap = { ...(await tmdbGenreMap('Movie', apiKey)), ...(await tmdbGenreMap('Series', apiKey)) };
+  const libraryIds = buildLibraryTmdbIds(libraryItems);
+  const titleIndex = buildLibraryTitleIndex(libraryItems);
+  const today = new Date().toISOString().slice(0, 10);
+  const sections = [];
+  const dateNote = date => !date ? 'No date yet' : (date > today ? `Releases ${date}` : `Released ${date}`);
+
+  // 1) Missing / upcoming seasons of the shows in the library
+  const seasonCards = [];
+  await Promise.all(series.filter(s => s?.ProviderIds?.Tmdb).slice(0, UPCOMING_MAX_SERIES).map(async s => {
+    let details;
+    try { details = await tmdbTvDetails(String(s.ProviderIds.Tmdb), apiKey); }
+    catch (e) { console.warn(`TMDB tv details failed for "${s.Name}":`, e.message); return; }
+    const owned = ownedSeasons?.get(s.Id) || new Set();
+    for (const sn of details.seasons) {
+      if (owned.has(sn.seasonNumber)) continue;
+      const future = !!sn.airDate && sn.airDate > today;
+      seasonCards.push({
+        Id: `season-${s.Id}-${sn.seasonNumber}`,
+        Name: `${s.Name} — Season ${sn.seasonNumber}`,
+        CommunityRating: null,
+        ProductionYear: tmdbYear(sn.airDate),
+        ReleaseDate: sn.airDate,
+        ImageUrl: details.posterPath ? `${TMDB_IMAGE}${details.posterPath}` : undefined,
+        ExternalUrl: `https://www.themoviedb.org/tv/${s.ProviderIds.Tmdb}/season/${sn.seasonNumber}`,
+        note: sn.airDate
+          ? (future ? `Season ${sn.seasonNumber} releases ${sn.airDate}` : `Season ${sn.seasonNumber} aired ${sn.airDate}`)
+          : `Season ${sn.seasonNumber} — no date yet`
+      });
+    }
+  }));
+  if (seasonCards.length) sections.push({ heading: 'Missing / upcoming seasons of your shows', items: seasonCards });
+
+  // 2) Sequels ("part x") via the TMDB collections of the movies in the library
+  const sequelCards = [];
+  await Promise.all(movies.filter(m => m?.ProviderIds?.Tmdb).slice(0, UPCOMING_MAX_MOVIES).map(async m => {
+    let collection;
+    try {
+      const cid = await tmdbMovieCollectionId(String(m.ProviderIds.Tmdb), apiKey);
+      if (!cid) return;
+      collection = await tmdbCollection(cid, apiKey, genreMap);
+    } catch (e) { console.warn(`TMDB collection failed for "${m.Name}":`, e.message); return; }
+    for (const p of collection.parts) {
+      if (isInLibrary(p, libraryIds, titleIndex)) continue;
+      sequelCards.push({ ...p, Name: `${collection.name}: ${p.Name}`, note: dateNote(p.ReleaseDate) });
+    }
+  }));
+  if (sequelCards.length) sections.push({ heading: 'Sequels / collection parts not in your library', items: sequelCards });
+
+  // 3) Favorite actors / directors of the watched titles -> their other works
+  const people = new Map();
+  const bump = (p, role) => {
+    const key = `${role}-${p.id}`;
+    const e = people.get(key) || { id: p.id, name: p.name, role, count: 0 };
+    e.count++;
+    people.set(key, e);
+  };
+  await Promise.all(watchedAnchors.filter(a => a?.ProviderIds?.Tmdb).slice(0, UPCOMING_MAX_CREDIT_ANCHORS).map(async a => {
+    let credits;
+    try { credits = await tmdbCredits(String(a.ProviderIds.Tmdb), a.Type, apiKey); }
+    catch (e) { console.warn(`TMDB credits failed for "${a.Name}":`, e.message); return; }
+    credits.cast.forEach(c => bump(c, 'actor'));
+    credits.directors.forEach(d => bump(d, 'director'));
+  }));
+  const topPeople = (role, n) => [...people.values()].filter(p => p.role === role).sort((x, y) => y.count - x.count).slice(0, n);
+  const actorCards = [], directorCards = [], personUpcoming = [];
+  await Promise.all([...topPeople('actor', UPCOMING_MAX_ACTORS), ...topPeople('director', UPCOMING_MAX_DIRECTORS)].map(async person => {
+    let works;
+    try { works = await tmdbPersonWorks(person.id, apiKey, genreMap); }
+    catch (e) { console.warn(`TMDB person credits failed for ${person.name}:`, e.message); return; }
+    for (const w of works) {
+      if (isInLibrary(w, libraryIds, titleIndex)) continue;
+      const future = !!w.ReleaseDate && w.ReleaseDate > today;
+      const card = { ...w, note: `${person.role === 'actor' ? 'with' : 'by'} ${person.name}` + (w.ReleaseDate ? ` · ${future ? 'releases' : 'released'} ${w.ReleaseDate}` : '') };
+      (person.role === 'actor' ? actorCards : directorCards).push(card);
+      if (future) personUpcoming.push(card);
+    }
+  }));
+  const byRating = (a, b) => (b.CommunityRating || 0) - (a.CommunityRating || 0) || (b.Popularity || 0) - (a.Popularity || 0);
+  if (actorCards.length) sections.push({ heading: 'More from your favorite actors', items: actorCards.sort(byRating).slice(0, 12) });
+  if (directorCards.length) sections.push({ heading: 'More from your favorite directors', items: directorCards.sort(byRating).slice(0, 12) });
+
+  // 4) Everything with a future release date, in one place
+  const upcoming = [
+    ...seasonCards.filter(c => c.ReleaseDate && c.ReleaseDate > today),
+    ...sequelCards.filter(c => c.ReleaseDate && c.ReleaseDate > today),
+    ...personUpcoming
+  ];
+  if (upcoming.length) sections.push({ heading: 'Upcoming releases', items: upcoming.slice(0, 18) });
+
+  return sections;
 }
