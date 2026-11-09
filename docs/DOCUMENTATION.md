@@ -192,8 +192,9 @@ through the throttled `tmdbFetch` (≤ `TMDB_MAX_REQ_PER_SEC = 40` req/s, 429 �
 - **Completeness — shows** (`getMissingSeasons`): one raw Jellyfin call
   (`/Users/{userId}/Items?IncludeItemTypes=Season&Recursive=true`, `getOwnedSeasonsBySeries` in `script.js`)
   maps series id → owned season numbers. Per library series (max `UPCOMING_MAX_SERIES = 40`), TMDB
-  `/tv/{id}` lists all seasons (season 0 "Specials" ignored); seasons not owned become cards
-  "Show — Season N" with note "aired/released <date>" / "releases <date>", linking to the TMDB season page.
+  `/tv/{id}` lists all seasons (season 0 "Specials" ignored); seasons not owned become cards titled with the
+  show name, note "Season N aired <date>" / "Season N releases <date>", poster = season poster (fallback: series
+  poster), linking to the TMDB season page.
 - **Completeness — movies** (`getMissingSequels`): per library movie (max `UPCOMING_MAX_MOVIES = 20`), TMDB
   `/movie/{id}` → `belongs_to_collection` → `/collection/{id}` parts; parts already in the library
   (`isInLibrary`: TMDB id or title+year) are dropped, the rest become "Collection: Title" cards with a
@@ -205,7 +206,8 @@ through the throttled `tmdbFetch` (≤ `TMDB_MAX_REQ_PER_SEC = 40` req/s, 429 �
 - **Upcoming** (`getUpcomingReleases`): missing seasons/sequels of the type + people works, filtered to
   future `ReleaseDate`, sorted by date (max 24).
 
-Cards show the note line under the year (`createContentCard` renders `Content.note`).
+Cards show the note line under the year (`createContentCard` renders `Content.note`); score/rating lines are
+omitted when absent, and titles clamp at 2 lines instead of one-line ellipsis (`.Content-info h3`).
 
 ## 6. Configuration
 

@@ -104,9 +104,9 @@ function createContentCard(Content) {
     info.appendChild(el);
   };
   addLine('h3', null, Content.Name);
-  addLine('p', 'rating', `Score: ${typeof Content.similarityScore === 'number' ? Content.similarityScore.toFixed(0) + '%' : 'N/A'}`);
-  // CommunityRating can be null (items without a rating)
-  addLine('p', 'rating', `Community Rating: ${typeof Content.CommunityRating === 'number' ? Content.CommunityRating.toFixed(2) : 'N/A'}`);
+  // External/TMDB cards often have no score/rating (e.g. unaired seasons): show the line only when present
+  if (typeof Content.similarityScore === 'number') addLine('p', 'rating', `Score: ${Content.similarityScore.toFixed(0)}%`);
+  if (typeof Content.CommunityRating === 'number') addLine('p', 'rating', `Community Rating: ${Content.CommunityRating.toFixed(2)}`);
   addLine('p', 'year', `Year: ${Content.ProductionYear || 'N/A'}`);
   // External "upcoming & missing" cards carry a note (release date, "with <actor>", …)
   if (Content.note) addLine('p', 'year', Content.note);

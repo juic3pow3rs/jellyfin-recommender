@@ -438,9 +438,13 @@ main,
   font-size: 1.05em;
   color: var(--font-color);
   font-weight: 600;
-  white-space: nowrap;
+  /* up to 2 lines, then ellipsis — long titles stay readable instead of being chopped to one line */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .Content-info .rating,

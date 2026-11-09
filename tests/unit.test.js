@@ -213,7 +213,7 @@ const upcomingMocks = () => {
     { season_number: 1, air_date: '2020-01-01', episode_count: 10 },
     { season_number: 2, air_date: '2021-01-01', episode_count: 10 },
     { season_number: 3, air_date: '2022-05-01', episode_count: 8 },
-    { season_number: 4, air_date: '2099-01-01', episode_count: 8 }
+    { season_number: 4, air_date: '2099-01-01', episode_count: 8, poster_path: '/s4.jpg' }
   ] };
   const movieDetails = { belongs_to_collection: { id: 999 } };
   const collection = { name: 'Anchor Collection', parts: [
@@ -247,12 +247,13 @@ test('tmdb.js: getMissingSeasons excludes owned seasons/specials and resolves id
   const series = [{ Id: 's1', Name: 'My Show', Type: 'Series', ProductionYear: 2020, ProviderIds: {} }]; // no Tmdb id -> search fallback
   const owned = new Map([['s1', new Set([1, 2])]]);
   const cards = await getMissingSeasons(series, owned, 'KEY');
-  const names = cards.map(c => c.Name).join(' | ');
-  assert.ok(names.includes('Season 3') && names.includes('Season 4'), names);
-  assert.ok(!names.includes('Season 1') && !names.includes('Specials'), 'owned seasons and specials excluded');
-  assert.ok(cards.find(c => c.Name.includes('Season 4')).note.includes('releases 2099-01-01'));
-  assert.ok(cards.find(c => c.Name.includes('Season 3')).note.includes('2022-05-01'));
+  assert.equal(cards.length, 2, 'only the missing seasons (3, 4); owned 1-2 and specials excluded');
+  assert.ok(cards.every(c => c.Name === 'My Show'), 'card title is the show name, not a long "Show — Season N"');
+  assert.ok(cards.find(c => c.note.includes('Season 4')).note.includes('releases 2099-01-01'));
+  assert.ok(cards.find(c => c.note.includes('Season 3')).note.includes('aired 2022-05-01'), 'past seasons say "aired", not "aired/released"');
   assert.ok(cards[0].ExternalUrl.includes('/tv/300/season/'));
+  assert.ok(cards.find(c => c.note.includes('Season 4')).ImageUrl.includes('/s4.jpg'), 'season poster preferred');
+  assert.ok(cards.find(c => c.note.includes('Season 3')).ImageUrl.includes('/tv.jpg'), 'falls back to the series poster');
 });
 
 test('tmdb.js: getMissingSequels excludes library parts by tmdb id AND by title+year', async () => {
