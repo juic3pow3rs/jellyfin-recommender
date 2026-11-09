@@ -49,43 +49,53 @@
       <label id="loginErrorMessage" class="error-message" role="alert"></label>
     </div>
   </div>
-    <main id="recommendations-container">
+  <div id="pages">
+    <nav id="pageNav" class="page-nav" aria-label="Views">
+      <button type="button" class="page-btn" data-page="recommendations" aria-pressed="true">Recommendations</button>
+      <button type="button" class="page-btn" data-page="completeness" aria-pressed="false">Collection completeness</button>
+      <button type="button" class="page-btn" data-page="people" aria-pressed="false">Actors &amp; directors</button>
+      <button type="button" class="page-btn" data-page="upcoming" aria-pressed="false">Upcoming</button>
+    </nav>
+    <main id="recommendations-container" class="page" data-page="recommendations">
         <div id="filter-bar" class="filter-bar" hidden>
-          <div class="toggle-group" role="group" aria-label="Content type">
+          <div class="toggle-group" data-group="all" role="group" aria-label="Content type">
             <span class="toggle-label" id="typeToggleLabel">Type:</span>
             <button type="button" class="toggle-btn" data-type="Movie" aria-pressed="true">Movies</button>
             <button type="button" class="toggle-btn" data-type="Series" aria-pressed="false">Shows</button>
           </div>
-          <div class="toggle-group" role="group" aria-label="Recommendation base">
+          <div class="toggle-group" data-group="recommendations" role="group" aria-label="Recommendation base">
             <span class="toggle-label" id="scopeToggleLabel">Base:</span>
             <button type="button" class="toggle-btn" data-scope="watched" aria-pressed="true">Watched only</button>
             <button type="button" class="toggle-btn" data-scope="all" aria-pressed="false">Whole library</button>
           </div>
-          <div class="toggle-group" role="group" aria-label="Recommendations outside the library">
-            <span class="toggle-label" id="newToggleLabel">New to library:</span>
-            <button type="button" class="toggle-btn" data-new="off" aria-pressed="true">Off</button>
-            <button type="button" class="toggle-btn" data-new="on" aria-pressed="false">On</button>
+          <div class="toggle-group" data-group="recommendations" role="group" aria-label="Recommendation source">
+            <span class="toggle-label" id="sourceToggleLabel">Source:</span>
+            <button type="button" class="toggle-btn" data-source="library" aria-pressed="true">In library</button>
+            <button type="button" class="toggle-btn" data-source="new" aria-pressed="false">New (TMDB)</button>
           </div>
-          <div class="toggle-group" role="group" aria-label="Upcoming and missing content">
-            <span class="toggle-label" id="upToggleLabel">Upcoming:</span>
-            <button type="button" class="toggle-btn" data-up="off" aria-pressed="true">Off</button>
-            <button type="button" class="toggle-btn" data-up="on" aria-pressed="false">On</button>
-          </div>
-          <div class="toggle-group tmdb-key-group">
+          <div class="toggle-group tmdb-key-group" data-group="all">
             <label class="toggle-label" for="tmdbApiKey">TMDB API key:</label>
-            <input type="password" id="tmdbApiKey" placeholder="optional, enables \"New to library\"" autocomplete="off">
+            <input type="password" id="tmdbApiKey" placeholder="needed for the TMDB views" autocomplete="off">
           </div>
-          <button type="button" id="shuffleBtn" class="shuffle-btn" title="Pick other anchor movies/shows and recompute"><i class="fa-solid fa-shuffle"></i> Shuffle</button>
+          <button type="button" id="shuffleBtn" data-group="recommendations" class="shuffle-btn" title="Pick other anchor movies/shows and recompute"><i class="fa-solid fa-shuffle"></i> Shuffle</button>
         </div>
         <div id="taste-recommendations-container" class="because-you-watched-container"></div>
         <div id="new-content-container" class="because-you-watched-container"></div>
-        <div id="upcoming-container" class="because-you-watched-container"></div>
-        <div id="new-content-divider" class="section-divider" hidden><span>In your library</span></div>
         <!-- Content recommendations will be loaded here -->
         <div class="loading-message">
             Loading recommendations...
         </div>
     </main>
+    <section class="page" id="page-completeness" data-page="completeness" hidden>
+        <div id="completeness-container" class="because-you-watched-container"></div>
+    </section>
+    <section class="page" id="page-people" data-page="people" hidden>
+        <div id="people-container" class="because-you-watched-container"></div>
+    </section>
+    <section class="page" id="page-upcoming" data-page="upcoming" hidden>
+        <div id="upcoming-container" class="because-you-watched-container"></div>
+    </section>
+  </div>
 
     <!-- Important: scripts must load after the DOM is ready -->
     <!-- Copies of jeffersoncgo/cdn (js/*.js) and jeffersoncgo/CoverMaker (js/jellyfin.js, js/windowsHandle.js).

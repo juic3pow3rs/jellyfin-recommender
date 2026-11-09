@@ -25,7 +25,7 @@ test('index.html loads the vendored copies, not the live sites of the other repo
 test('index.html has the filter toggles and the external-recommendation controls', () => {
   const html = read('index.html');
   assert.match(html, /id="filter-bar"/);
-  for (const v of ['data-type="Movie"', 'data-type="Series"', 'data-scope="watched"', 'data-scope="all"', 'data-new="off"', 'data-new="on"', 'id="tmdbApiKey"', 'id="new-content-container"', 'id="new-content-divider"', 'id="shuffleBtn"', 'id="upcoming-container"', 'data-up="off"', 'data-up="on"'])
+  for (const v of ['data-type="Movie"', 'data-type="Series"', 'data-scope="watched"', 'data-scope="all"', 'data-source="library"', 'data-source="new"', 'id="tmdbApiKey"', 'id="new-content-container"', 'id="shuffleBtn"', 'id="upcoming-container"', 'data-page="recommendations"', 'data-page="completeness"', 'data-page="people"', 'data-page="upcoming"', 'id="page-completeness"', 'id="page-people"', 'id="page-upcoming"', 'id="completeness-container"', 'id="people-container"'])
     assert.ok(html.includes(v), v);
   assert.match(html, /src="tmdb\.js"/);
   // Required by the TMDB API terms of use (attribution)
@@ -206,7 +206,7 @@ test('tmdb.js: library items without a TMDB id still exclude their title from th
   assert.ok(stats.excluded >= 1);
 });
 
-test('tmdb.js: getUpcomingAndMissing finds missing seasons, sequels, favorite people and upcoming dates', async () => {
+const upcomingMocks = () => {
   const genreList = { genres: [{ id: 28, name: 'Action' }] };
   const tvDetails = { poster_path: '/tv.jpg', seasons: [
     { season_number: 0, name: 'Specials', air_date: '2019-01-01', episode_count: 5 },
@@ -224,9 +224,11 @@ test('tmdb.js: getUpcomingAndMissing finds missing seasons, sequels, favorite pe
   const credits = { cast: [{ id: 55, name: 'Star Actor' }], crew: [{ id: 66, name: 'Top Director', job: 'Director' }] };
   const person55 = { cast: [{ id: 201, media_type: 'movie', title: 'Actor Movie', release_date: '2015-01-01', vote_average: 8, popularity: 50, genre_ids: [28], poster_path: '/p.jpg' }], crew: [] };
   const person66 = { cast: [], crew: [{ id: 202, media_type: 'movie', title: 'Director Movie', release_date: '2099-03-01', vote_average: 0, popularity: 5, genre_ids: [28] }] };
-  const fetchMock = async (url) => {
+  const search = { results: [{ id: 300, name: 'My Show', popularity: 10 }] };
+  return async (url) => {
     const json = async () => {
       if (url.includes('/genre/')) return genreList;
+      if (url.includes('/search/tv')) return search;
       if (url.includes('/tv/300')) return tvDetails;
       if (url.includes('/movie/100/credits')) return credits;
       if (url.includes('/movie/100?')) return movieDetails;
@@ -237,40 +239,55 @@ test('tmdb.js: getUpcomingAndMissing finds missing seasons, sequels, favorite pe
     };
     return { ok: true, json };
   };
-  const ctx = loadTmdb(fetchMock, { setTimeout: (cb) => cb() });
-  const getUp = vm.runInContext('getUpcomingAndMissing', ctx);
-  const series = [{ Id: 's1', Name: 'My Show', Type: 'Series', ProviderIds: { Tmdb: '300' } }];
+};
+
+test('tmdb.js: getMissingSeasons excludes owned seasons/specials and resolves ids via search when missing', async () => {
+  const ctx = loadTmdb(upcomingMocks(), { setTimeout: (cb) => cb() });
+  const getMissingSeasons = vm.runInContext('getMissingSeasons', ctx);
+  const series = [{ Id: 's1', Name: 'My Show', Type: 'Series', ProductionYear: 2020, ProviderIds: {} }]; // no Tmdb id -> search fallback
+  const owned = new Map([['s1', new Set([1, 2])]]);
+  const cards = await getMissingSeasons(series, owned, 'KEY');
+  const names = cards.map(c => c.Name).join(' | ');
+  assert.ok(names.includes('Season 3') && names.includes('Season 4'), names);
+  assert.ok(!names.includes('Season 1') && !names.includes('Specials'), 'owned seasons and specials excluded');
+  assert.ok(cards.find(c => c.Name.includes('Season 4')).note.includes('releases 2099-01-01'));
+  assert.ok(cards.find(c => c.Name.includes('Season 3')).note.includes('2022-05-01'));
+  assert.ok(cards[0].ExternalUrl.includes('/tv/300/season/'));
+});
+
+test('tmdb.js: getMissingSequels excludes library parts by tmdb id AND by title+year', async () => {
+  const ctx = loadTmdb(upcomingMocks(), { setTimeout: (cb) => cb() });
+  const getMissingSequels = vm.runInContext('getMissingSequels', ctx);
+  const movie = { Id: 'm1', Name: 'Anchor', Type: 'Movie', ProviderIds: { Tmdb: '100' } };
+  const library = [movie, { Id: 'l1', Name: 'Anchor Part 2', Type: 'Movie', ProductionYear: 2011 }]; // no Tmdb id -> title match
+  const cards = await getMissingSequels([movie], library, 'KEY');
+  assert.ok(!cards.some(c => c.TmdbId === '100'), 'owned by tmdb id excluded');
+  assert.ok(!cards.some(c => c.TmdbId === '101'), 'owned by title+year (no tmdb id) excluded');
+  assert.ok(cards.some(c => c.TmdbId === '102'), 'missing sequel kept');
+  assert.ok(cards.find(c => c.TmdbId === '102').note.includes('Releases 2099-06-01'));
+  assert.ok(cards.find(c => c.TmdbId === '102').Name.includes('Anchor Collection'));
+});
+
+test('tmdb.js: getFavoritePeopleWorks groups works by actor/director with date notes', async () => {
+  const ctx = loadTmdb(upcomingMocks(), { setTimeout: (cb) => cb() });
+  const getPeople = vm.runInContext('getFavoritePeopleWorks', ctx);
+  const anchor = { Id: 'm1', Name: 'Anchor', Type: 'Movie', ProviderIds: { Tmdb: '100' }, UserData: { Played: true } };
+  const { actors, directors } = await getPeople([anchor], [anchor], 'Movie', 'KEY');
+  assert.ok(actors.some(c => c.Name === 'Actor Movie' && c.note.includes('with Star Actor')), JSON.stringify(actors.map(a => a.note)));
+  assert.ok(directors.some(c => c.Name === 'Director Movie' && c.note.includes('by Top Director') && c.note.includes('releases 2099-03-01')));
+});
+
+test('tmdb.js: getUpcomingReleases returns only future-dated items, sorted by date', async () => {
+  const ctx = loadTmdb(upcomingMocks(), { setTimeout: (cb) => cb() });
+  const getUpcoming = vm.runInContext('getUpcomingReleases', ctx);
   const movie = { Id: 'm1', Name: 'Anchor', Type: 'Movie', ProviderIds: { Tmdb: '100' }, UserData: { Played: true } };
-  const ownedSeasons = new Map([['s1', new Set([1, 2])]]);
-  const sections = await getUp({ series, movies: [movie], watchedAnchors: [movie], ownedSeasons, libraryItems: [series[0], movie], apiKey: 'KEY' });
-  const headings = sections.map(s => s.heading);
-
-  const seasons = sections.find(s => s.heading.includes('seasons'));
-  assert.ok(seasons, 'seasons section present');
-  const seasonNames = seasons.items.map(i => i.Name).join(' | ');
-  assert.ok(seasonNames.includes('Season 3') && seasonNames.includes('Season 4'), seasonNames);
-  assert.ok(!seasonNames.includes('Season 1') && !seasonNames.includes('Specials'), 'owned seasons and specials excluded');
-  assert.ok(seasons.items.find(i => i.Name.includes('Season 4')).note.includes('releases 2099-01-01'));
-  assert.ok(seasons.items.find(i => i.Name.includes('Season 3')).note.includes('aired 2022-05-01'));
-  assert.ok(seasons.items[0].ExternalUrl.includes('/tv/300/season/'));
-
-  const sequels = sections.find(s => s.heading.includes('Sequels'));
-  assert.ok(sequels, 'sequels section present');
-  const sequelNames = sequels.items.map(i => i.Name).join(' | ');
-  assert.ok(!sequels.items.some(i => i.Name === 'Anchor Collection: Anchor'), 'owned part (tmdb id in library) excluded');
-  assert.ok(sequelNames.includes('Anchor Part 2') && sequelNames.includes('Anchor Part 3'), sequelNames);
-
-  const actors = sections.find(s => s.heading.includes('actors'));
-  assert.ok(actors && actors.items.some(i => i.Name === 'Actor Movie' && i.note.includes('with Star Actor')), 'actor works with note');
-  const directors = sections.find(s => s.heading.includes('directors'));
-  assert.ok(directors && directors.items.some(i => i.Name === 'Director Movie' && i.note.includes('by Top Director')), 'director works with note');
-
-  const upcoming = sections.find(s => s.heading === 'Upcoming releases');
-  assert.ok(upcoming, 'upcoming section present');
-  const upNames = upcoming.items.map(i => i.Name).join(' | ');
-  assert.ok(upNames.includes('Season 4') && upNames.includes('Anchor Part 3') && upNames.includes('Director Movie'), upNames);
-  assert.ok(!upNames.includes('Season 3') && !upNames.includes('Anchor Part 2') && !upNames.includes('Actor Movie'), 'only future dates in upcoming');
-  assert.ok(headings.length >= 5);
+  const series = [{ Id: 's1', Name: 'My Show', Type: 'Series', ProviderIds: { Tmdb: '300' } }];
+  const cards = await getUpcoming({ items: [movie], watchedItems: [movie], libraryItems: [movie, series], ownedSeasons: new Map([['s1', new Set([1, 2])]]), type: 'Movie', apiKey: 'KEY' });
+  const names = cards.map(c => c.Name).join(' | ');
+  assert.ok(names.includes('Anchor Part 3') && names.includes('Director Movie'), names);
+  assert.ok(!names.includes('Actor Movie') && !names.includes('Anchor Part 2'), 'past-dated items excluded');
+  const dates = cards.map(c => c.ReleaseDate);
+  assert.equal(JSON.stringify(dates), JSON.stringify([...dates].sort()), 'sorted by release date');
 });
 
 test('tmdb.js: anchors without a Tmdb provider id are resolved through a TMDB title search', async () => {
