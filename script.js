@@ -28,11 +28,13 @@ const tmdbKeyInput = document.getElementById('tmdbApiKey');
 const filterState = {
   type: localStorage.getItem('recommender.type') || 'Movie',
   scope: localStorage.getItem('recommender.scope') || 'watched',
-  newContent: localStorage.getItem('recommender.newContent') || 'off'
+  newContent: localStorage.getItem('recommender.newContent') || 'off',
+  upcoming: localStorage.getItem('recommender.upcoming') || 'off'
 };
 if (!RECOMMENDABLE_TYPES.includes(filterState.type)) filterState.type = 'Movie';
 if (!['watched', 'all'].includes(filterState.scope)) filterState.scope = 'watched';
 if (!['off', 'on'].includes(filterState.newContent)) filterState.newContent = 'off';
+if (!['off', 'on'].includes(filterState.upcoming)) filterState.upcoming = 'off';
 if (tmdbKeyInput) tmdbKeyInput.value = localStorage.getItem('tmdbApiKey') || '';
 
 // Function to generate Jellyfin Content detail URL
@@ -103,6 +105,8 @@ function createContentCard(Content) {
   // CommunityRating can be null (items without a rating)
   addLine('p', 'rating', `Community Rating: ${typeof Content.CommunityRating === 'number' ? Content.CommunityRating.toFixed(2) : 'N/A'}`);
   addLine('p', 'year', `Year: ${Content.ProductionYear || 'N/A'}`);
+  // External "upcoming & missing" cards carry a note (release date, "with <actor>", …)
+  if (Content.note) addLine('p', 'year', Content.note);
 
   ContentCard.append(img, info);
 
@@ -215,9 +219,9 @@ function displayBasedOnYourTastes(recommendations) {
 // Removes only the recommendation sections: the filter bar and the named container elements stay in place
 function clearRecommendationSections() {
   recommendationsContainer
-    .querySelectorAll('.because-you-watched-container:not(#taste-recommendations-container):not(#new-content-container), .no-results-message, .loading-message')
+    .querySelectorAll('.because-you-watched-container:not(#taste-recommendations-container):not(#new-content-container):not(#upcoming-container), .no-results-message, .loading-message')
     .forEach(el => el.remove());
-  for (const id of ['taste-recommendations-container', 'new-content-container']) {
+  for (const id of ['taste-recommendations-container', 'new-content-container', 'upcoming-container']) {
     const el = document.getElementById(id);
     if (el) el.innerHTML = '';
   }
@@ -299,6 +303,7 @@ function InitializeJellyfin(explicitLogin = false) {
       await updateTestesSugestions(true);
       await updateRecommendations();
       await updateNewContent();
+      await updateUpcoming();
     },
     onSearchFinish: () => {
       // This callback might be for search results, not directly used here for recommendations.
@@ -404,7 +409,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // --- Data Fetching Functions ---
 
 // Generic function to get items from Jellyfin library
-const getList = async (Library, PlayStatus) => {
+const getList = async (Library, PlayStatus, type = filterState.type) => {
   // Ensure jellyfin instance is ready
   if (!window.jellyfin || !window.jellyfin.isAuthenticated) {
       console.warn("Jellyfin not authenticated or initialized. Cannot fetch list.");
@@ -434,7 +439,8 @@ const getList = async (Library, PlayStatus) => {
     // The Jellyfin.js searchItems function returns a promise that resolves with the item list.
     // The Movies/Shows toggle is applied here and not at load time: the library cache is shared with CoverMaker,
     // and loading fewer types there would make each app reload the other's cache on every visit.
-    return filterByContentType(items, filterState.type); // Ensure we always return an array
+    // type = null skips the filter (the "Upcoming & missing" section looks at movies AND shows).
+    return type ? filterByContentType(items, type) : (items || []); // Ensure we always return an array
   } catch (error) {
     console.error(`Error fetching ${PlayStatus || 'all'} items from library '${Library}':`, error);
     return []; // Return empty array on error
@@ -560,7 +566,8 @@ function syncToggleButtons() {
   filterBar.querySelectorAll('.toggle-btn').forEach(btn => {
     const active = (btn.dataset.type && btn.dataset.type === filterState.type) ||
                    (btn.dataset.scope && btn.dataset.scope === filterState.scope) ||
-                   (btn.dataset.new && btn.dataset.new === filterState.newContent);
+                   (btn.dataset.new && btn.dataset.new === filterState.newContent) ||
+                   (btn.dataset.up && btn.dataset.up === filterState.upcoming);
     btn.classList.toggle('active', !!active);
     btn.setAttribute('aria-pressed', String(!!active));
   });
@@ -571,9 +578,11 @@ filterBar.querySelectorAll('.toggle-btn').forEach(btn => {
     if (btn.dataset.type) filterState.type = btn.dataset.type;
     if (btn.dataset.scope) filterState.scope = btn.dataset.scope;
     if (btn.dataset.new) filterState.newContent = btn.dataset.new;
+    if (btn.dataset.up) filterState.upcoming = btn.dataset.up;
     localStorage.setItem('recommender.type', filterState.type);
     localStorage.setItem('recommender.scope', filterState.scope);
     localStorage.setItem('recommender.newContent', filterState.newContent);
+    localStorage.setItem('recommender.upcoming', filterState.upcoming);
     syncToggleButtons();
     // Before login nothing is loaded yet; the saved choice is applied on the next login
     if (!window.jellyfin?.isAuthenticated) return;
@@ -608,8 +617,8 @@ shuffleBtn?.addEventListener('click', async () => {
 async function updateNewContent() {
   if (!newContentContainer) return;
   newContentContainer.innerHTML = '';
-  // The divider marks where the external ("new") recommendations end and the in-library ones begin
-  if (newContentDivider) newContentDivider.hidden = filterState.newContent !== 'on';
+  // The divider marks where the external sections end and the in-library ones begin
+  if (newContentDivider) newContentDivider.hidden = !(filterState.newContent === 'on' || filterState.upcoming === 'on');
   if (filterState.newContent !== 'on') return;
 
   const apiKey = localStorage.getItem('tmdbApiKey') || '';
@@ -672,4 +681,79 @@ async function refreshRecommendations() {
   await updateTestesSugestions(true);
   await updateRecommendations();
   await updateNewContent();
+  await updateUpcoming();
+}
+
+// ======================
+// "Upcoming & missing" section (TMDB): missing seasons, sequels, favorite actors/directors, upcoming dates
+// ======================
+// One raw Jellyfin call: all Season items in the library, grouped by series id -> Set of season numbers
+async function getOwnedSeasonsBySeries() {
+  const jf = window.jellyfin;
+  const url = `${jf.Server.Address}/Users/${jf.User.Id}/Items?IncludeItemTypes=Season&Recursive=true&Fields=ParentId,IndexNumber&Limit=999999`;
+  const res = await fetch(url, { headers: { authorization: jf.headers.authorization } });
+  if (!res.ok) throw new Error(`Jellyfin responded ${res.status}`);
+  const data = await res.json();
+  const map = new Map();
+  for (const s of data.Items || []) {
+    if (!s.ParentId || typeof s.IndexNumber !== 'number') continue;
+    if (!map.has(s.ParentId)) map.set(s.ParentId, new Set());
+    map.get(s.ParentId).add(s.IndexNumber);
+  }
+  return map;
+}
+
+async function updateUpcoming() {
+  const container = document.getElementById('upcoming-container');
+  if (!container) return;
+  container.innerHTML = '';
+  if (filterState.upcoming !== 'on') return;
+
+  const apiKey = localStorage.getItem('tmdbApiKey') || '';
+  const hint = (text) => {
+    const el = document.createElement('div');
+    el.className = 'no-results-message';
+    el.textContent = text;
+    container.appendChild(el);
+  };
+  if (!apiKey) { hint('Enter your TMDB API key in the bar above to see upcoming & missing content.'); return; }
+  if (typeof tmdbKeyLooksValid === 'function' && !tmdbKeyLooksValid(apiKey)) {
+    hint('That does not look like a TMDB v3 API key (32 hex characters). Use the "API Key" from themoviedb.org/settings/api, not the v4 "Read Access Token".');
+    return;
+  }
+
+  try {
+    const allItems = await getList(null, 'All', null); // both movies and shows, regardless of the type toggle
+    const ownedSeasons = await getOwnedSeasonsBySeries();
+    const watched = allItems.filter(i => i?.UserData?.Played);
+    const sections = await getUpcomingAndMissing({
+      series: allItems.filter(i => i?.Type === 'Series'),
+      movies: allItems.filter(i => i?.Type === 'Movie'),
+      watchedAnchors: watched,
+      ownedSeasons,
+      libraryItems: allItems,
+      apiKey
+    });
+    const title = document.createElement('h2');
+    title.classList.add('because-you-watched-title');
+    title.textContent = 'Upcoming & missing from your library';
+    container.appendChild(title);
+    if (!sections.length) {
+      hint('Nothing missing or upcoming found — your library looks complete and TMDB has no dated follow-ups for it.');
+      return;
+    }
+    for (const section of sections) {
+      const h = document.createElement('h3');
+      h.classList.add('upcoming-subheading');
+      h.textContent = section.heading;
+      container.appendChild(h);
+      const grid = document.createElement('div');
+      grid.classList.add('Content-grid');
+      section.items.forEach(item => grid.appendChild(createContentCard(item)));
+      container.appendChild(grid);
+    }
+  } catch (error) {
+    console.error('Error fetching upcoming & missing:', error);
+    hint(`Error loading upcoming & missing content (${error.message}).`);
+  }
 }
