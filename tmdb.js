@@ -71,6 +71,7 @@ function normalizeTmdbItem(raw, type, genreMap) {
   return {
     Id: `tmdb-${kind}-${raw.id}`,
     TmdbId: String(raw.id),
+    Type: isMovie ? 'Movie' : 'Series',
     Name: (isMovie ? raw.title : raw.name) || (isMovie ? raw.original_title : raw.original_name) || 'Unknown',
     Genres: (raw.genre_ids || []).map(id => genreMap[id]).filter(Boolean),
     CommunityRating: typeof raw.vote_average === 'number' ? raw.vote_average : null,
@@ -214,7 +215,9 @@ async function getExternalRecommendations(anchors, libraryItems, type, apiKey, {
 }
 
 // ======================
-// Upcoming & missing: seasons, sequels, favorite people (all via TMDB, all rate-limited by tmdbFetch)
+// Pages 2-4 data: collection completeness, favorite people, upcoming releases.
+// TMDB ids are resolved through resolveAnchorTmdbId (ProviderIds.Tmdb, else a TMDB title search), so items
+// from an old cache or a Meilisearch load still work. Everything goes through the throttled tmdbFetch.
 // ======================
 const UPCOMING_MAX_SERIES = 40;        // tv-details requests for season completeness
 const UPCOMING_MAX_MOVIES = 20;        // movie-details + collection requests for sequels
@@ -268,60 +271,74 @@ async function tmdbPersonWorks(personId, apiKey, genreMap) {
   return [...seen.values()];
 }
 
-// Builds the "Upcoming & missing" sections. ownedSeasons: Map seriesId -> Set(seasonNumber) from Jellyfin.
-// Returns [{ heading, items }] where items are card-shaped (Name, ExternalUrl, note, …).
-async function getUpcomingAndMissing({ series = [], movies = [], watchedAnchors = [], ownedSeasons, libraryItems = [], apiKey }) {
-  if (!apiKey) return [];
-  const genreMap = { ...(await tmdbGenreMap('Movie', apiKey)), ...(await tmdbGenreMap('Series', apiKey)) };
-  const libraryIds = buildLibraryTmdbIds(libraryItems);
-  const titleIndex = buildLibraryTitleIndex(libraryItems);
-  const today = new Date().toISOString().slice(0, 10);
-  const sections = [];
-  const dateNote = date => !date ? 'No date yet' : (date > today ? `Releases ${date}` : `Released ${date}`);
+function upcomingDateNote(prefix, date, today) {
+  if (!date) return `${prefix} — no date yet`;
+  return date > today ? `${prefix} releases ${date}` : `${prefix} aired/released ${date}`;
+}
 
-  // 1) Missing / upcoming seasons of the shows in the library
-  const seasonCards = [];
-  await Promise.all(series.filter(s => s?.ProviderIds?.Tmdb).slice(0, UPCOMING_MAX_SERIES).map(async s => {
+// Page 2 (shows): seasons of the given library series that TMDB knows but the library does not have.
+// ownedSeasons: Map seriesId -> Set(seasonNumber) from Jellyfin.
+async function getMissingSeasons(series, ownedSeasons, apiKey) {
+  if (!apiKey) return [];
+  const today = new Date().toISOString().slice(0, 10);
+  const cards = [];
+  await Promise.all((series || []).slice(0, UPCOMING_MAX_SERIES).map(async s => {
+    const tmdbId = await resolveAnchorTmdbId(s, 'Series', apiKey);
+    if (!tmdbId) return;
     let details;
-    try { details = await tmdbTvDetails(String(s.ProviderIds.Tmdb), apiKey); }
+    try { details = await tmdbTvDetails(tmdbId, apiKey); }
     catch (e) { console.warn(`TMDB tv details failed for "${s.Name}":`, e.message); return; }
     const owned = ownedSeasons?.get(s.Id) || new Set();
     for (const sn of details.seasons) {
       if (owned.has(sn.seasonNumber)) continue;
-      const future = !!sn.airDate && sn.airDate > today;
-      seasonCards.push({
+      cards.push({
         Id: `season-${s.Id}-${sn.seasonNumber}`,
         Name: `${s.Name} — Season ${sn.seasonNumber}`,
         CommunityRating: null,
         ProductionYear: tmdbYear(sn.airDate),
         ReleaseDate: sn.airDate,
         ImageUrl: details.posterPath ? `${TMDB_IMAGE}${details.posterPath}` : undefined,
-        ExternalUrl: `https://www.themoviedb.org/tv/${s.ProviderIds.Tmdb}/season/${sn.seasonNumber}`,
-        note: sn.airDate
-          ? (future ? `Season ${sn.seasonNumber} releases ${sn.airDate}` : `Season ${sn.seasonNumber} aired ${sn.airDate}`)
-          : `Season ${sn.seasonNumber} — no date yet`
+        ExternalUrl: `https://www.themoviedb.org/tv/${tmdbId}/season/${sn.seasonNumber}`,
+        note: upcomingDateNote(`Season ${sn.seasonNumber}`, sn.airDate, today)
       });
     }
   }));
-  if (seasonCards.length) sections.push({ heading: 'Missing / upcoming seasons of your shows', items: seasonCards });
+  return cards;
+}
 
-  // 2) Sequels ("part x") via the TMDB collections of the movies in the library
-  const sequelCards = [];
-  await Promise.all(movies.filter(m => m?.ProviderIds?.Tmdb).slice(0, UPCOMING_MAX_MOVIES).map(async m => {
+// Page 2 (movies): collection parts ("part x") of the given library movies that are not in the library
+async function getMissingSequels(movies, libraryItems, apiKey) {
+  if (!apiKey) return [];
+  const genreMap = await tmdbGenreMap('Movie', apiKey);
+  const libraryIds = buildLibraryTmdbIds(libraryItems);
+  const titleIndex = buildLibraryTitleIndex(libraryItems);
+  const today = new Date().toISOString().slice(0, 10);
+  const cards = [];
+  await Promise.all((movies || []).slice(0, UPCOMING_MAX_MOVIES).map(async m => {
+    const tmdbId = await resolveAnchorTmdbId(m, 'Movie', apiKey);
+    if (!tmdbId) return;
     let collection;
     try {
-      const cid = await tmdbMovieCollectionId(String(m.ProviderIds.Tmdb), apiKey);
+      const cid = await tmdbMovieCollectionId(tmdbId, apiKey);
       if (!cid) return;
       collection = await tmdbCollection(cid, apiKey, genreMap);
     } catch (e) { console.warn(`TMDB collection failed for "${m.Name}":`, e.message); return; }
     for (const p of collection.parts) {
       if (isInLibrary(p, libraryIds, titleIndex)) continue;
-      sequelCards.push({ ...p, Name: `${collection.name}: ${p.Name}`, note: dateNote(p.ReleaseDate) });
+      cards.push({ ...p, Name: `${collection.name}: ${p.Name}`, note: !p.ReleaseDate ? 'No date yet' : (p.ReleaseDate > today ? `Releases ${p.ReleaseDate}` : `Released ${p.ReleaseDate}`) });
     }
   }));
-  if (sequelCards.length) sections.push({ heading: 'Sequels / collection parts not in your library', items: sequelCards });
+  return cards;
+}
 
-  // 3) Favorite actors / directors of the watched titles -> their other works
+// Page 3: other works (of the given type) of the most frequent actors/directors among the anchor items
+async function getFavoritePeopleWorks(anchors, libraryItems, type, apiKey) {
+  const empty = { actors: [], directors: [] };
+  if (!apiKey) return empty;
+  const genreMap = { ...(await tmdbGenreMap('Movie', apiKey)), ...(await tmdbGenreMap('Series', apiKey)) };
+  const libraryIds = buildLibraryTmdbIds(libraryItems);
+  const titleIndex = buildLibraryTitleIndex(libraryItems);
+  const today = new Date().toISOString().slice(0, 10);
   const people = new Map();
   const bump = (p, role) => {
     const key = `${role}-${p.id}`;
@@ -329,38 +346,44 @@ async function getUpcomingAndMissing({ series = [], movies = [], watchedAnchors 
     e.count++;
     people.set(key, e);
   };
-  await Promise.all(watchedAnchors.filter(a => a?.ProviderIds?.Tmdb).slice(0, UPCOMING_MAX_CREDIT_ANCHORS).map(async a => {
+  await Promise.all((anchors || []).slice(0, UPCOMING_MAX_CREDIT_ANCHORS).map(async a => {
+    const tmdbId = await resolveAnchorTmdbId(a, type, apiKey);
+    if (!tmdbId) return;
     let credits;
-    try { credits = await tmdbCredits(String(a.ProviderIds.Tmdb), a.Type, apiKey); }
+    try { credits = await tmdbCredits(tmdbId, type, apiKey); }
     catch (e) { console.warn(`TMDB credits failed for "${a.Name}":`, e.message); return; }
     credits.cast.forEach(c => bump(c, 'actor'));
     credits.directors.forEach(d => bump(d, 'director'));
   }));
   const topPeople = (role, n) => [...people.values()].filter(p => p.role === role).sort((x, y) => y.count - x.count).slice(0, n);
-  const actorCards = [], directorCards = [], personUpcoming = [];
+  const actorCards = [], directorCards = [];
   await Promise.all([...topPeople('actor', UPCOMING_MAX_ACTORS), ...topPeople('director', UPCOMING_MAX_DIRECTORS)].map(async person => {
     let works;
     try { works = await tmdbPersonWorks(person.id, apiKey, genreMap); }
     catch (e) { console.warn(`TMDB person credits failed for ${person.name}:`, e.message); return; }
     for (const w of works) {
+      if (w.Type !== type) continue;
       if (isInLibrary(w, libraryIds, titleIndex)) continue;
       const future = !!w.ReleaseDate && w.ReleaseDate > today;
       const card = { ...w, note: `${person.role === 'actor' ? 'with' : 'by'} ${person.name}` + (w.ReleaseDate ? ` · ${future ? 'releases' : 'released'} ${w.ReleaseDate}` : '') };
       (person.role === 'actor' ? actorCards : directorCards).push(card);
-      if (future) personUpcoming.push(card);
     }
   }));
   const byRating = (a, b) => (b.CommunityRating || 0) - (a.CommunityRating || 0) || (b.Popularity || 0) - (a.Popularity || 0);
-  if (actorCards.length) sections.push({ heading: 'More from your favorite actors', items: actorCards.sort(byRating).slice(0, 12) });
-  if (directorCards.length) sections.push({ heading: 'More from your favorite directors', items: directorCards.sort(byRating).slice(0, 12) });
+  return { actors: actorCards.sort(byRating).slice(0, 12), directors: directorCards.sort(byRating).slice(0, 12) };
+}
 
-  // 4) Everything with a future release date, in one place
-  const upcoming = [
-    ...seasonCards.filter(c => c.ReleaseDate && c.ReleaseDate > today),
-    ...sequelCards.filter(c => c.ReleaseDate && c.ReleaseDate > today),
-    ...personUpcoming
-  ];
-  if (upcoming.length) sections.push({ heading: 'Upcoming releases', items: upcoming.slice(0, 18) });
-
-  return sections;
+// Page 4: everything with a future release date — missing seasons/sequels of the type + people works
+async function getUpcomingReleases({ items, watchedItems, libraryItems, ownedSeasons, type, apiKey }) {
+  if (!apiKey) return [];
+  const today = new Date().toISOString().slice(0, 10);
+  let cards = type === 'Series'
+    ? await getMissingSeasons(items, ownedSeasons, apiKey)
+    : await getMissingSequels(items, libraryItems, apiKey);
+  const people = await getFavoritePeopleWorks(watchedItems, libraryItems, type, apiKey);
+  cards = cards.concat(people.actors, people.directors);
+  return cards
+    .filter(c => c.ReleaseDate && c.ReleaseDate > today)
+    .sort((a, b) => a.ReleaseDate.localeCompare(b.ReleaseDate))
+    .slice(0, 24);
 }

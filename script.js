@@ -20,22 +20,25 @@ const NEW_CONTENT_ANCHORS = 12;
 
 const noImage = "https://placehold.co/200x280/808080/FFFFFF?text=No+Image"
 
-// --- Filter state: Movies/Shows, Watched only/Whole library, New-to-library (all persisted) ---
+// --- Filter state (persisted): Movies/Shows, Watched only/Whole library, source In library/New (TMDB) ---
 const filterBar = document.getElementById('filter-bar');
 const newContentContainer = document.getElementById('new-content-container');
-const newContentDivider = document.getElementById('new-content-divider');
 const tmdbKeyInput = document.getElementById('tmdbApiKey');
 const filterState = {
   type: localStorage.getItem('recommender.type') || 'Movie',
   scope: localStorage.getItem('recommender.scope') || 'watched',
-  newContent: localStorage.getItem('recommender.newContent') || 'off',
-  upcoming: localStorage.getItem('recommender.upcoming') || 'off'
+  // "New (TMDB)" used to be the newContent on/off toggle; migrate the old key
+  source: localStorage.getItem('recommender.source') || (localStorage.getItem('recommender.newContent') === 'on' ? 'new' : 'library')
 };
 if (!RECOMMENDABLE_TYPES.includes(filterState.type)) filterState.type = 'Movie';
 if (!['watched', 'all'].includes(filterState.scope)) filterState.scope = 'watched';
-if (!['off', 'on'].includes(filterState.newContent)) filterState.newContent = 'off';
-if (!['off', 'on'].includes(filterState.upcoming)) filterState.upcoming = 'off';
+if (!['library', 'new'].includes(filterState.source)) filterState.source = 'library';
 if (tmdbKeyInput) tmdbKeyInput.value = localStorage.getItem('tmdbApiKey') || '';
+
+// --- Pages (views): recommendations / completeness / people / upcoming ---
+const PAGES = ['recommendations', 'completeness', 'people', 'upcoming'];
+let currentPage = localStorage.getItem('recommender.page') || 'recommendations';
+if (!PAGES.includes(currentPage)) currentPage = 'recommendations';
 
 // Function to generate Jellyfin Content detail URL
 function makeContentUrl(id) {
@@ -219,11 +222,11 @@ function displayBasedOnYourTastes(recommendations) {
 // Removes only the recommendation sections: the filter bar and the named container elements stay in place
 function clearRecommendationSections() {
   recommendationsContainer
-    .querySelectorAll('.because-you-watched-container:not(#taste-recommendations-container):not(#new-content-container):not(#upcoming-container), .no-results-message, .loading-message')
+    .querySelectorAll('.because-you-watched-container:not(#taste-recommendations-container):not(#new-content-container), .no-results-message, .loading-message')
     .forEach(el => el.remove());
-  for (const id of ['taste-recommendations-container', 'new-content-container', 'upcoming-container']) {
+  for (const id of ['taste-recommendations-container', 'new-content-container', 'completeness-container', 'people-container', 'upcoming-container']) {
     const el = document.getElementById(id);
-    if (el) el.innerHTML = '';
+    if (el) { el.innerHTML = ''; el.style.display = ''; }
   }
 }
 
@@ -289,7 +292,7 @@ function InitializeJellyfin(explicitLogin = false) {
       jellyfinloginActionBtn.removeAttribute('inactive');
       if (jellyfinLogoutBtn) jellyfinLogoutBtn.hidden = false;
       document.getElementById("loginBtn").setAttribute('logged-in', 'true');
-      if (filterBar) { filterBar.hidden = false; syncToggleButtons(); }
+      if (filterBar) { filterBar.hidden = false; syncToggleButtons(); switchPage(currentPage, false); } // load happens in onLibraryLoad
       // Clear any previous error messages
       document.getElementById('loginErrorMessage').innerText = "";
       // Trigger library load after successful login
@@ -299,11 +302,8 @@ function InitializeJellyfin(explicitLogin = false) {
       }
     },
     onLibraryLoad: async () => { // This callback is directly handled by the Jellyfin class when libraries are ready
-      // Fetch and display recommendations when libraries are loaded
-      await updateTestesSugestions(true);
-      await updateRecommendations();
-      await updateNewContent();
-      await updateUpcoming();
+      // Fetch and display the current page when libraries are loaded
+      await loadCurrentPage();
     },
     onSearchFinish: () => {
       // This callback might be for search results, not directly used here for recommendations.
@@ -566,8 +566,7 @@ function syncToggleButtons() {
   filterBar.querySelectorAll('.toggle-btn').forEach(btn => {
     const active = (btn.dataset.type && btn.dataset.type === filterState.type) ||
                    (btn.dataset.scope && btn.dataset.scope === filterState.scope) ||
-                   (btn.dataset.new && btn.dataset.new === filterState.newContent) ||
-                   (btn.dataset.up && btn.dataset.up === filterState.upcoming);
+                   (btn.dataset.source && btn.dataset.source === filterState.source);
     btn.classList.toggle('active', !!active);
     btn.setAttribute('aria-pressed', String(!!active));
   });
@@ -577,12 +576,10 @@ filterBar.querySelectorAll('.toggle-btn').forEach(btn => {
   btn.addEventListener('click', async () => {
     if (btn.dataset.type) filterState.type = btn.dataset.type;
     if (btn.dataset.scope) filterState.scope = btn.dataset.scope;
-    if (btn.dataset.new) filterState.newContent = btn.dataset.new;
-    if (btn.dataset.up) filterState.upcoming = btn.dataset.up;
+    if (btn.dataset.source) filterState.source = btn.dataset.source;
     localStorage.setItem('recommender.type', filterState.type);
     localStorage.setItem('recommender.scope', filterState.scope);
-    localStorage.setItem('recommender.newContent', filterState.newContent);
-    localStorage.setItem('recommender.upcoming', filterState.upcoming);
+    localStorage.setItem('recommender.source', filterState.source);
     syncToggleButtons();
     // Before login nothing is loaded yet; the saved choice is applied on the next login
     if (!window.jellyfin?.isAuthenticated) return;
@@ -591,14 +588,13 @@ filterBar.querySelectorAll('.toggle-btn').forEach(btn => {
 });
 syncToggleButtons();
 
-// The TMDB key is saved on change; with "New to library" on, the section is recomputed
+// The TMDB key is saved on change; the current page is recomputed when it uses TMDB
 tmdbKeyInput?.addEventListener('change', () => {
   localStorage.setItem('tmdbApiKey', tmdbKeyInput.value.trim());
-  if (filterState.newContent === 'on' && window.jellyfin?.isAuthenticated) refreshRecommendations();
+  if (window.jellyfin?.isAuthenticated) refreshRecommendations();
 });
 
 // Shuffle: reset the anchor memory and recompute, so different anchor movies/shows are picked
-// (both the in-library "Because you watched" groups and the external "New to library" ones)
 const shuffleBtn = document.getElementById('shuffleBtn');
 let shuffling = false;
 shuffleBtn?.addEventListener('click', async () => {
@@ -613,30 +609,121 @@ shuffleBtn?.addEventListener('click', async () => {
   }
 });
 
+// ======================
+// Pages (views): recommendations / collection completeness / actors & directors / upcoming
+// ======================
+function switchPage(page, load = true) {
+  if (!PAGES.includes(page)) page = 'recommendations';
+  currentPage = page;
+  localStorage.setItem('recommender.page', page);
+  document.querySelectorAll('#pageNav .page-btn').forEach(b => {
+    const active = b.dataset.page === page;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', String(active));
+  });
+  document.querySelectorAll('.page').forEach(p => { p.hidden = p.dataset.page !== page; });
+  // Only the toggles relevant to the current page are shown in the filter bar
+  filterBar.querySelectorAll('[data-group]').forEach(g => {
+    g.hidden = !(g.dataset.group === 'all' || g.dataset.group === page);
+  });
+  if (load && window.jellyfin?.isAuthenticated) loadCurrentPage();
+}
+
+document.querySelectorAll('#pageNav .page-btn').forEach(b => {
+  b.addEventListener('click', () => switchPage(b.dataset.page));
+});
+switchPage(currentPage);
+
+async function loadCurrentPage() {
+  if (currentPage === 'recommendations') await loadRecommendationsPage();
+  else if (currentPage === 'completeness') await loadCompletenessPage();
+  else if (currentPage === 'people') await loadPeoplePage();
+  else await loadUpcomingPage();
+}
+
+// Recomputes the current page from scratch with the current type/scope/source
+async function refreshRecommendations() {
+  resetRecommendationState(); // findSimilar.js: anchors/candidates already used
+  recommendationsShowed = 0;
+  for (const key of ['watched', 'unwatched', 'Played', 'Unplayed', 'allItems', 'recommendations', 'tasteProfile', 'profileQueries', 'searchEngine']) {
+    delete window[key];
+  }
+  clearRecommendationSections();
+  await loadCurrentPage();
+}
+
+function hintIn(container, text) {
+  const el = document.createElement('div');
+  el.className = 'no-results-message';
+  el.textContent = text;
+  container.appendChild(el);
+}
+
+function pageTitle(container, text) {
+  const h = document.createElement('h2');
+  h.classList.add('because-you-watched-title');
+  h.textContent = text;
+  container.appendChild(h);
+}
+
+function renderCardsGrid(container, heading, items) {
+  if (heading) {
+    const h = document.createElement('h3');
+    h.classList.add('upcoming-subheading');
+    h.textContent = heading;
+    container.appendChild(h);
+  }
+  if (!items || !items.length) {
+    hintIn(container, 'Nothing found for the current selection.');
+    return;
+  }
+  const grid = document.createElement('div');
+  grid.classList.add('Content-grid');
+  items.forEach(item => grid.appendChild(createContentCard(item)));
+  container.appendChild(grid);
+}
+
+// Returns the saved TMDB key, or shows a hint in the container and returns null
+function tmdbKeyOrHint(container) {
+  const apiKey = localStorage.getItem('tmdbApiKey') || '';
+  if (!apiKey) {
+    hintIn(container, 'Enter your TMDB API key in the bar above to use this view.');
+    return null;
+  }
+  // Fail fast on the wrong kind of key: the v4 Read Access Token (JWT) instead of the v3 API Key (32 hex chars)
+  if (typeof tmdbKeyLooksValid === 'function' && !tmdbKeyLooksValid(apiKey)) {
+    hintIn(container, 'That does not look like a TMDB v3 API key (32 hex characters). Use the "API Key" from themoviedb.org/settings/api, not the v4 "Read Access Token".');
+    return null;
+  }
+  return apiKey;
+}
+
+// --- Page 1: recommendations — source "In library" (taste + because-you-watched) or "New (TMDB)" ---
+async function loadRecommendationsPage() {
+  const loading = document.createElement('div');
+  loading.className = 'loading-message';
+  loading.textContent = 'Loading recommendations...';
+  recommendationsContainer.appendChild(loading);
+  const tasteContainer = document.getElementById('taste-recommendations-container');
+  if (filterState.source === 'new') {
+    if (tasteContainer) tasteContainer.style.display = 'none';
+    if (newContentContainer) newContentContainer.style.display = '';
+    await updateNewContent();
+  } else {
+    if (tasteContainer) tasteContainer.style.display = '';
+    if (newContentContainer) newContentContainer.style.display = 'none';
+    await updateTestesSugestions(true);
+    await updateRecommendations();
+  }
+}
+
 // "New to your library": recommendations for items NOT in the Jellyfin library yet (via TMDB, tmdb.js)
 async function updateNewContent() {
   if (!newContentContainer) return;
   newContentContainer.innerHTML = '';
-  // The divider marks where the external sections end and the in-library ones begin
-  if (newContentDivider) newContentDivider.hidden = !(filterState.newContent === 'on' || filterState.upcoming === 'on');
-  if (filterState.newContent !== 'on') return;
-
-  const apiKey = localStorage.getItem('tmdbApiKey') || '';
-  const hint = (text) => {
-    const el = document.createElement('div');
-    el.className = 'no-results-message';
-    el.textContent = text;
-    newContentContainer.appendChild(el);
-  };
-  if (!apiKey) {
-    hint('Enter your TMDB API key in the bar above to get recommendations outside your library.');
-    return;
-  }
-  // Fail fast on the wrong kind of key: the v4 Read Access Token (JWT) instead of the v3 API Key (32 hex chars)
-  if (typeof tmdbKeyLooksValid === 'function' && !tmdbKeyLooksValid(apiKey)) {
-    hint('That does not look like a TMDB v3 API key (32 hex characters). Use the "API Key" from themoviedb.org/settings/api, not the v4 "Read Access Token".');
-    return;
-  }
+  recommendationsContainer.querySelector('.loading-message')?.remove();
+  const apiKey = tmdbKeyOrHint(newContentContainer);
+  if (!apiKey) return;
 
   try {
     const { base } = await getScopeLists();
@@ -646,10 +733,7 @@ async function updateNewContent() {
       perAnchor: similarsToShow
     });
     console.info('[tmdb] anchors:', stats.anchors, '| with TMDB id:', stats.anchorsWithId, '| fetched:', stats.fetched, '| already in library:', stats.excluded, '| groups:', stats.groups);
-    const title = document.createElement('h2');
-    title.classList.add('because-you-watched-title');
-    title.textContent = 'New to your library (not in Jellyfin yet)';
-    newContentContainer.appendChild(title);
+    pageTitle(newContentContainer, 'New to your library (not in Jellyfin yet)');
     if (!groups.length) {
       let reason = 'no similar title scored high enough for the current anchors.';
       if (stats.anchorsWithId === 0) reason = 'none of the base items could be matched on TMDB (no TMDB id, no title match).';
@@ -662,32 +746,82 @@ async function updateNewContent() {
   } catch (error) {
     console.error('Error fetching external recommendations:', error);
     // error.message carries the TMDB status (e.g. "TMDB responded 401"), never the key
-    hint(`Error loading new-content recommendations (${error.message}). Check the TMDB API key and your network.`);
+    hintIn(newContentContainer, `Error loading new-content recommendations (${error.message}). Check the TMDB API key and your network.`);
   }
 }
 
-// Recomputes both sections from scratch with the current type/scope
-async function refreshRecommendations() {
-  resetRecommendationState(); // findSimilar.js: anchors/candidates already used
-  recommendationsShowed = 0;
-  for (const key of ['watched', 'unwatched', 'Played', 'Unplayed', 'allItems', 'recommendations', 'tasteProfile', 'profileQueries', 'searchEngine']) {
-    delete window[key];
+// --- Page 2: collection completeness — whole library; Shows => missing seasons, Movies => sequel parts ---
+async function loadCompletenessPage() {
+  const container = document.getElementById('completeness-container');
+  if (!container) return;
+  container.innerHTML = '';
+  const apiKey = tmdbKeyOrHint(container);
+  if (!apiKey) return;
+  try {
+    const all = await getList(null, 'All', null); // the whole library, both types
+    const ofType = filterByContentType(all, filterState.type);
+    if (filterState.type === 'Series') {
+      const ownedSeasons = await getOwnedSeasonsBySeries();
+      const items = await getMissingSeasons(ofType, ownedSeasons, apiKey);
+      pageTitle(container, 'Collection completeness — your shows');
+      renderCardsGrid(container, 'Missing / upcoming seasons of your shows', items);
+    } else {
+      const items = await getMissingSequels(ofType, all, apiKey);
+      pageTitle(container, 'Collection completeness — your movies');
+      renderCardsGrid(container, 'Sequels / collection parts not in your library', items);
+    }
+  } catch (error) {
+    console.error('Error loading collection completeness:', error);
+    hintIn(container, `Error loading collection completeness (${error.message}).`);
   }
-  clearRecommendationSections();
-  const loading = document.createElement('div');
-  loading.className = 'loading-message';
-  loading.textContent = 'Loading recommendations...';
-  recommendationsContainer.appendChild(loading);
-  await updateTestesSugestions(true);
-  await updateRecommendations();
-  await updateNewContent();
-  await updateUpcoming();
+}
+
+// --- Page 3: favorite actors & directors — whole library of the selected type ---
+async function loadPeoplePage() {
+  const container = document.getElementById('people-container');
+  if (!container) return;
+  container.innerHTML = '';
+  const apiKey = tmdbKeyOrHint(container);
+  if (!apiKey) return;
+  try {
+    const all = await getList(null, 'All', null);
+    const ofType = filterByContentType(all, filterState.type);
+    let anchors = ofType.filter(i => i?.UserData?.Played);
+    if (!anchors.length) anchors = ofType; // nothing played of this type: fall back to the whole type
+    const { actors, directors } = await getFavoritePeopleWorks(anchors, all, filterState.type, apiKey);
+    pageTitle(container, filterState.type === 'Series' ? 'Your favorite actors & directors — shows' : 'Your favorite actors & directors — movies');
+    renderCardsGrid(container, 'More from your favorite actors', actors);
+    renderCardsGrid(container, 'More from your favorite directors', directors);
+  } catch (error) {
+    console.error('Error loading favorite people:', error);
+    hintIn(container, `Error loading actors & directors (${error.message}).`);
+  }
+}
+
+// --- Page 4: upcoming releases feed — future-dated items only, whole library of the selected type ---
+async function loadUpcomingPage() {
+  const container = document.getElementById('upcoming-container');
+  if (!container) return;
+  container.innerHTML = '';
+  const apiKey = tmdbKeyOrHint(container);
+  if (!apiKey) return;
+  try {
+    const all = await getList(null, 'All', null);
+    const ofType = filterByContentType(all, filterState.type);
+    const watched = ofType.filter(i => i?.UserData?.Played);
+    const ownedSeasons = filterState.type === 'Series' ? await getOwnedSeasonsBySeries() : undefined;
+    const items = await getUpcomingReleases({ items: ofType, watchedItems: watched, libraryItems: all, ownedSeasons, type: filterState.type, apiKey });
+    pageTitle(container, 'Upcoming releases');
+    renderCardsGrid(container, 'Releases with a future date', items);
+  } catch (error) {
+    console.error('Error loading upcoming releases:', error);
+    hintIn(container, `Error loading upcoming releases (${error.message}).`);
+  }
 }
 
 // ======================
-// "Upcoming & missing" section (TMDB): missing seasons, sequels, favorite actors/directors, upcoming dates
+// Jellyfin: owned seasons per series (one raw API call)
 // ======================
-// One raw Jellyfin call: all Season items in the library, grouped by series id -> Set of season numbers
 async function getOwnedSeasonsBySeries() {
   const jf = window.jellyfin;
   const url = `${jf.Server.Address}/Users/${jf.User.Id}/Items?IncludeItemTypes=Season&Recursive=true&Fields=ParentId,IndexNumber&Limit=999999`;
@@ -701,59 +835,4 @@ async function getOwnedSeasonsBySeries() {
     map.get(s.ParentId).add(s.IndexNumber);
   }
   return map;
-}
-
-async function updateUpcoming() {
-  const container = document.getElementById('upcoming-container');
-  if (!container) return;
-  container.innerHTML = '';
-  if (filterState.upcoming !== 'on') return;
-
-  const apiKey = localStorage.getItem('tmdbApiKey') || '';
-  const hint = (text) => {
-    const el = document.createElement('div');
-    el.className = 'no-results-message';
-    el.textContent = text;
-    container.appendChild(el);
-  };
-  if (!apiKey) { hint('Enter your TMDB API key in the bar above to see upcoming & missing content.'); return; }
-  if (typeof tmdbKeyLooksValid === 'function' && !tmdbKeyLooksValid(apiKey)) {
-    hint('That does not look like a TMDB v3 API key (32 hex characters). Use the "API Key" from themoviedb.org/settings/api, not the v4 "Read Access Token".');
-    return;
-  }
-
-  try {
-    const allItems = await getList(null, 'All', null); // both movies and shows, regardless of the type toggle
-    const ownedSeasons = await getOwnedSeasonsBySeries();
-    const watched = allItems.filter(i => i?.UserData?.Played);
-    const sections = await getUpcomingAndMissing({
-      series: allItems.filter(i => i?.Type === 'Series'),
-      movies: allItems.filter(i => i?.Type === 'Movie'),
-      watchedAnchors: watched,
-      ownedSeasons,
-      libraryItems: allItems,
-      apiKey
-    });
-    const title = document.createElement('h2');
-    title.classList.add('because-you-watched-title');
-    title.textContent = 'Upcoming & missing from your library';
-    container.appendChild(title);
-    if (!sections.length) {
-      hint('Nothing missing or upcoming found — your library looks complete and TMDB has no dated follow-ups for it.');
-      return;
-    }
-    for (const section of sections) {
-      const h = document.createElement('h3');
-      h.classList.add('upcoming-subheading');
-      h.textContent = section.heading;
-      container.appendChild(h);
-      const grid = document.createElement('div');
-      grid.classList.add('Content-grid');
-      section.items.forEach(item => grid.appendChild(createContentCard(item)));
-      container.appendChild(grid);
-    }
-  } catch (error) {
-    console.error('Error fetching upcoming & missing:', error);
-    hint(`Error loading upcoming & missing content (${error.message}).`);
-  }
 }
