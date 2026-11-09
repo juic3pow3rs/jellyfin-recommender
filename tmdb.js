@@ -225,7 +225,7 @@ const UPCOMING_MAX_CREDIT_ANCHORS = 8; // watched titles whose credits build the
 const UPCOMING_MAX_ACTORS = 5;
 const UPCOMING_MAX_DIRECTORS = 3;
 
-// TMDB tv details: every season (season 0 = specials is ignored) with its air date
+// TMDB tv details: every season (season 0 = specials is ignored) with its air date and own poster
 async function tmdbTvDetails(tmdbId, apiKey) {
   const data = await tmdbFetch(`/tv/${tmdbId}?language=en-US`, apiKey);
   const seasons = (data.seasons || [])
@@ -234,7 +234,8 @@ async function tmdbTvDetails(tmdbId, apiKey) {
       seasonNumber: s.season_number,
       name: s.name || `Season ${s.season_number}`,
       airDate: s.air_date || null,
-      episodeCount: s.episode_count || 0
+      episodeCount: s.episode_count || 0,
+      posterPath: s.poster_path || null
     }));
   return { seasons, posterPath: data.poster_path || null };
 }
@@ -271,9 +272,9 @@ async function tmdbPersonWorks(personId, apiKey, genreMap) {
   return [...seen.values()];
 }
 
-function upcomingDateNote(prefix, date, today) {
+function upcomingDateNote(prefix, date, today, pastVerb = 'aired') {
   if (!date) return `${prefix} — no date yet`;
-  return date > today ? `${prefix} releases ${date}` : `${prefix} aired/released ${date}`;
+  return date > today ? `${prefix} releases ${date}` : `${prefix} ${pastVerb} ${date}`;
 }
 
 // Page 2 (shows): seasons of the given library series that TMDB knows but the library does not have.
@@ -291,15 +292,16 @@ async function getMissingSeasons(series, ownedSeasons, apiKey) {
     const owned = ownedSeasons?.get(s.Id) || new Set();
     for (const sn of details.seasons) {
       if (owned.has(sn.seasonNumber)) continue;
+      const poster = sn.posterPath || details.posterPath;
       cards.push({
         Id: `season-${s.Id}-${sn.seasonNumber}`,
-        Name: `${s.Name} — Season ${sn.seasonNumber}`,
+        Name: s.Name, // the season + date go in the note line, so the title stays short and readable
         CommunityRating: null,
         ProductionYear: tmdbYear(sn.airDate),
         ReleaseDate: sn.airDate,
-        ImageUrl: details.posterPath ? `${TMDB_IMAGE}${details.posterPath}` : undefined,
+        ImageUrl: poster ? `${TMDB_IMAGE}${poster}` : undefined,
         ExternalUrl: `https://www.themoviedb.org/tv/${tmdbId}/season/${sn.seasonNumber}`,
-        note: upcomingDateNote(`Season ${sn.seasonNumber}`, sn.airDate, today)
+        note: upcomingDateNote(`Season ${sn.seasonNumber}`, sn.airDate, today, 'aired')
       });
     }
   }));
