@@ -18,7 +18,10 @@ let recommendationsShowed = 0;
 // Costs ~6 TMDB requests per anchor (2 endpoints x 3 pages), throttled in tmdb.js.
 const NEW_CONTENT_ANCHORS = 12;
 
-const noImage = "https://placehold.co/200x280/808080/FFFFFF?text=No+Image"
+// Inline SVG placeholder — no external request, so it renders even when third-party hosts are blocked
+const noImage = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="300"><rect width="200" height="300" fill="#2a2a35"/><text x="100" y="155" font-size="16" fill="#9a9aad" text-anchor="middle" font-family="sans-serif">No Image</text></svg>'
+);
 
 // --- Filter state (persisted): Movies/Shows, Watched only/Whole library, source In library/New (TMDB) ---
 const filterBar = document.getElementById('filter-bar');
@@ -812,7 +815,10 @@ async function loadUpcomingPage() {
     const ownedSeasons = filterState.type === 'Series' ? await getOwnedSeasonsBySeries() : undefined;
     const items = await getUpcomingReleases({ items: ofType, watchedItems: watched, libraryItems: all, ownedSeasons, type: filterState.type, apiKey });
     pageTitle(container, 'Upcoming releases');
-    renderCardsGrid(container, 'Releases with a future date', items);
+    // grouped by where each recommendation comes from (seasons / collections / actors / directors)
+    const groups = typeof groupUpcomingBySource === 'function' ? groupUpcomingBySource(items) : [{ heading: 'Releases with a future date', items }];
+    if (!groups.length) hintIn(container, 'Nothing found for the current selection.');
+    for (const g of groups) renderCardsGrid(container, g.heading, g.items);
   } catch (error) {
     console.error('Error loading upcoming releases:', error);
     hintIn(container, `Error loading upcoming releases (${error.message}).`);

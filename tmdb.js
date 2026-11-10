@@ -296,6 +296,7 @@ async function getMissingSeasons(series, ownedSeasons, apiKey) {
       cards.push({
         Id: `season-${s.Id}-${sn.seasonNumber}`,
         Name: s.Name, // the season + date go in the note line, so the title stays short and readable
+        source: 'seasons', // where the recommendation comes from (grouping on the Upcoming page)
         CommunityRating: null,
         ProductionYear: tmdbYear(sn.airDate),
         ReleaseDate: sn.airDate,
@@ -327,7 +328,7 @@ async function getMissingSequels(movies, libraryItems, apiKey) {
     } catch (e) { console.warn(`TMDB collection failed for "${m.Name}":`, e.message); return; }
     for (const p of collection.parts) {
       if (isInLibrary(p, libraryIds, titleIndex)) continue;
-      cards.push({ ...p, Name: `${collection.name}: ${p.Name}`, note: !p.ReleaseDate ? 'No date yet' : (p.ReleaseDate > today ? `Releases ${p.ReleaseDate}` : `Released ${p.ReleaseDate}`) });
+      cards.push({ ...p, Name: `${collection.name}: ${p.Name}`, source: 'collections', note: !p.ReleaseDate ? 'No date yet' : (p.ReleaseDate > today ? `Releases ${p.ReleaseDate}` : `Released ${p.ReleaseDate}`) });
     }
   }));
   return cards;
@@ -367,7 +368,7 @@ async function getFavoritePeopleWorks(anchors, libraryItems, type, apiKey) {
       if (w.Type !== type) continue;
       if (isInLibrary(w, libraryIds, titleIndex)) continue;
       const future = !!w.ReleaseDate && w.ReleaseDate > today;
-      const card = { ...w, note: `${person.role === 'actor' ? 'with' : 'by'} ${person.name}` + (w.ReleaseDate ? ` · ${future ? 'releases' : 'released'} ${w.ReleaseDate}` : '') };
+      const card = { ...w, source: person.role === 'actor' ? 'actors' : 'directors', note: `${person.role === 'actor' ? 'with' : 'by'} ${person.name}` + (w.ReleaseDate ? ` · ${future ? 'releases' : 'released'} ${w.ReleaseDate}` : '') };
       (person.role === 'actor' ? actorCards : directorCards).push(card);
     }
   }));
@@ -375,7 +376,21 @@ async function getFavoritePeopleWorks(anchors, libraryItems, type, apiKey) {
   return { actors: actorCards.sort(byRating).slice(0, 12), directors: directorCards.sort(byRating).slice(0, 12) };
 }
 
-// Page 4: everything with a future release date — missing seasons/sequels of the type + people works
+// Page 4: everything with a future release date — missing seasons/sequels of the type + people works.
+// Every card carries `source` ('seasons' | 'collections' | 'actors' | 'directors') so the page can group by origin.
+const UPCOMING_SOURCE_HEADINGS = {
+  seasons: 'Upcoming seasons of your shows',
+  collections: 'Upcoming sequels / collection parts',
+  actors: 'Upcoming from your favorite actors',
+  directors: 'Upcoming from your favorite directors'
+};
+
+function groupUpcomingBySource(items) {
+  return ['seasons', 'collections', 'actors', 'directors']
+    .map(source => ({ source, heading: UPCOMING_SOURCE_HEADINGS[source], items: (items || []).filter(c => c.source === source) }))
+    .filter(g => g.items.length);
+}
+
 async function getUpcomingReleases({ items, watchedItems, libraryItems, ownedSeasons, type, apiKey }) {
   if (!apiKey) return [];
   const today = new Date().toISOString().slice(0, 10);

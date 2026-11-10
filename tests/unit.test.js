@@ -38,6 +38,13 @@ test('external section size and TMDB rate-limit cap are configured in the source
   assert.ok(read('tmdb.js').includes('TMDB_MAX_REQ_PER_SEC = 40'), 'TMDB_MAX_REQ_PER_SEC = 40 missing (stay below TMDB ~50 rps ceiling)');
 });
 
+test('cards: fixed poster-ratio image box without cropping, inline SVG placeholder (no external host)', () => {
+  const css = read('style.css');
+  assert.ok(css.includes('aspect-ratio: 2 / 3') && css.includes('object-fit: contain'), 'img uses a uniform poster box with contain (no chopping)');
+  assert.ok(!read('script.js').includes('placehold.co'), 'placeholder must not depend on an external host');
+  assert.ok(read('script.js').includes('data:image/svg+xml'), 'inline SVG placeholder present');
+});
+
 test('Docker setup serves the static app', () => {
   const dockerfile = read('Dockerfile');
   assert.match(dockerfile, /FROM nginx/);
@@ -289,6 +296,13 @@ test('tmdb.js: getUpcomingReleases returns only future-dated items, sorted by da
   assert.ok(!names.includes('Actor Movie') && !names.includes('Anchor Part 2'), 'past-dated items excluded');
   const dates = cards.map(c => c.ReleaseDate);
   assert.equal(JSON.stringify(dates), JSON.stringify([...dates].sort()), 'sorted by release date');
+  // every card is tagged with where it comes from, and groupUpcomingBySource groups in a stable order
+  assert.ok(cards.find(c => c.Name.includes('Anchor Part 3')).source === 'collections');
+  assert.ok(cards.find(c => c.Name === 'Director Movie').source === 'directors');
+  const group = vm.runInContext('groupUpcomingBySource', ctx);
+  const groups = group(cards);
+  assert.equal(JSON.stringify(groups.map(g => g.source)), JSON.stringify(['collections', 'directors']));
+  assert.ok(groups.every(g => g.heading.length > 0 && g.items.length > 0));
 });
 
 test('tmdb.js: anchors without a Tmdb provider id are resolved through a TMDB title search', async () => {

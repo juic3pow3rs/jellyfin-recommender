@@ -417,8 +417,10 @@ main,
 
 .Content-card img {
   width: 100%;
-  height: 270px; /* Adjusted height */
-  object-fit: cover;
+  aspect-ratio: 2 / 3; /* poster box: every card gets the same image height, no matter the source ratio */
+  height: auto;
+  object-fit: contain; /* never crop — letterbox non-poster ratios instead of chopping them */
+  background: var(--surface);
   display: block;
   border-bottom: 3px solid var(--primary); /* Accent border */
 }

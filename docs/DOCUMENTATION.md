@@ -203,11 +203,16 @@ through the throttled `tmdbFetch` (≤ `TMDB_MAX_REQ_PER_SEC = 40` req/s, 429 �
   watched items of the type are aggregated → top `UPCOMING_MAX_ACTORS = 5` actors + `UPCOMING_MAX_DIRECTORS = 3`
   directors → `/person/{id}/combined_credits`, filtered to the selected type and against the library, noted
   "with/by <name> · released/releases <date>", ranked by rating/popularity (12 cards each).
-- **Upcoming** (`getUpcomingReleases`): missing seasons/sequels of the type + people works, filtered to
-  future `ReleaseDate`, sorted by date (max 24).
+- **Upcoming** (`getUpcomingReleases` + `groupUpcomingBySource`): missing seasons/sequels of the type + works
+  of the favorite actors/directors, filtered to future `ReleaseDate`, sorted by date (max 24). Every card
+  carries `source` (`seasons` / `collections` / `actors` / `directors`) and the page renders one grid per
+  source with a heading ("Upcoming seasons of your shows", "Upcoming sequels / collection parts",
+  "Upcoming from your favorite actors/directors").
 
 Cards show the note line under the year (`createContentCard` renders `Content.note`); score/rating lines are
-omitted when absent, and titles clamp at 2 lines instead of one-line ellipsis (`.Content-info h3`).
+omitted when absent, and titles clamp at 2 lines instead of one-line ellipsis (`.Content-info h3`). Card
+images use a uniform 2:3 poster box with `object-fit: contain` (no cropping) and an inline SVG "No Image"
+placeholder, so no external placeholder host is needed.
 
 ## 6. Configuration
 
