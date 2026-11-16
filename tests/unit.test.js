@@ -48,6 +48,15 @@ test('cards: fixed poster-ratio image box without cropping, inline SVG placehold
   assert.ok(read('script.js').includes('data:image/svg+xml'), 'inline SVG placeholder present');
 });
 
+test('pages: hidden pages really hide (incl. #recommendations-container) and subheadings get positive margin', () => {
+  const css = read('style.css');
+  // #recommendations-container { display:flex } has ID specificity and would override .page[hidden] — the
+  // ID-qualified rule must exist so main (with the filter bar) is hidden on the other pages
+  assert.ok(/#recommendations-container\[hidden\]\s*\{[^}]*display:\s*none/.test(css), 'missing #recommendations-container[hidden] { display:none }');
+  const sub = css.match(/\.upcoming-subheading\s*\{[^}]*\}/)[0];
+  assert.ok(!/margin[^;]*-/.test(sub), 'subheading must not have a negative margin (grid overlapped the title)');
+});
+
 test('Docker setup serves the static app', () => {
   const dockerfile = read('Dockerfile');
   assert.match(dockerfile, /FROM nginx/);

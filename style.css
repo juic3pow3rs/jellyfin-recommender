@@ -361,7 +361,9 @@ main,
   width: 100%;
 }
 
-.page[hidden] {
+/* must beat #recommendations-container { display:flex } (ID specificity), otherwise main is never hidden */
+.page[hidden],
+#recommendations-container[hidden] {
   display: none;
 }
 
@@ -504,7 +506,7 @@ button.load-more-btn:disabled {
   font-size: 1.1em;
   font-weight: 600;
   color: var(--primary-light);
-  margin: 1.5rem 0 -0.5rem 0;
+  margin: 1.5rem 0 0.75rem 0; /* positive bottom margin: the grid must not overlap the section title */
 }
 
 /* Status Messages */
