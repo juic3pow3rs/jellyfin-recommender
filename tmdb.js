@@ -219,8 +219,8 @@ async function getExternalRecommendations(anchors, libraryItems, type, apiKey, {
 // TMDB ids are resolved through resolveAnchorTmdbId (ProviderIds.Tmdb, else a TMDB title search), so items
 // from an old cache or a Meilisearch load still work. Everything goes through the throttled tmdbFetch.
 // ======================
-const UPCOMING_MAX_SERIES = 40;        // tv-details requests for season completeness
-const UPCOMING_MAX_MOVIES = 100;       // movie-details requests for sequels (collections are deduped, see below)
+const UPCOMING_MAX_SERIES = 40;        // tv-details requests for season completeness (random sample per load)
+const UPCOMING_MAX_MOVIES = 100;       // movie-details requests for sequels (random sample per load; collections deduped, see below)
 const PEOPLE_MAX_TITLES = 60;          // library titles scanned for actor/director appearances
 const UPCOMING_MAX_ACTORS = 5;
 const UPCOMING_MAX_DIRECTORS = 3;
@@ -283,7 +283,8 @@ async function getMissingSeasons(series, ownedSeasons, apiKey) {
   if (!apiKey) return [];
   const today = new Date().toISOString().slice(0, 10);
   const cards = [];
-  await Promise.all((series || []).slice(0, UPCOMING_MAX_SERIES).map(async s => {
+  // random sample per load (not the first N in library order), so revisiting/Shuffle covers different series
+  await Promise.all(selectRandomContents(series || [], UPCOMING_MAX_SERIES).map(async s => {
     const tmdbId = await resolveAnchorTmdbId(s, 'Series', apiKey);
     if (!tmdbId) return;
     let details;
@@ -321,7 +322,8 @@ async function getMissingSequels(movies, libraryItems, apiKey) {
   const cards = [];
   const collectionCache = new Map(); // collectionId -> Promise<collection> (promise, so concurrent movies share one request)
   const seenParts = new Set();       // tmdb ids already emitted
-  await Promise.all((movies || []).slice(0, UPCOMING_MAX_MOVIES).map(async m => {
+  // random sample per load (not the first N in library order), so revisiting/Shuffle covers different movies
+  await Promise.all(selectRandomContents(movies || [], UPCOMING_MAX_MOVIES).map(async m => {
     const tmdbId = await resolveAnchorTmdbId(m, 'Movie', apiKey);
     if (!tmdbId) return;
     let cid;
