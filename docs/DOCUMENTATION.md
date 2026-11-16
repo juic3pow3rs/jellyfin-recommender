@@ -189,13 +189,17 @@ All TMDB ids are resolved through `resolveAnchorTmdbId` (`ProviderIds.Tmdb`, els
 title + year, cached per item) — so items from an old cache or a Meilisearch load still work. Everything goes
 through the throttled `tmdbFetch` (≤ `TMDB_MAX_REQ_PER_SEC = 40` req/s, 429 → wait + one retry).
 
-- **Completeness — shows** (`getMissingSeasons`): one raw Jellyfin call
+- **Completeness — shows** (`getMissingSeasons`): the Jellyfin library itself is fetched completely; only the
+  TMDB scan is capped. One raw Jellyfin call
   (`/Users/{userId}/Items?IncludeItemTypes=Season&Recursive=true`, `getOwnedSeasonsBySeries` in `script.js`)
   maps series id → owned season numbers. Per library series (max `UPCOMING_MAX_SERIES = 40`), TMDB
-  `/tv/{id}` lists all seasons (season 0 "Specials" ignored); seasons not owned become cards titled with the
+  `/tv/{id}` lists all seasons (season 0 "Specials" ignored). Per load a random sample of at most
+  `UPCOMING_MAX_SERIES = 40` series is scanned (`selectRandomContents`, so revisits cover different shows);
+  seasons not owned become cards titled with the
   show name, note "Season N aired <date>" / "Season N releases <date>", poster = season poster (fallback: series
   poster), linking to the TMDB season page.
-- **Completeness — movies** (`getMissingSequels`): per library movie (max `UPCOMING_MAX_MOVIES = 100`), TMDB
+- **Completeness — movies** (`getMissingSequels`): per library movie (a random sample of at most
+  `UPCOMING_MAX_MOVIES = 100` per load), TMDB
   `/movie/{id}` → `belongs_to_collection` → `/collection/{id}` parts; parts already in the library
   (`isInLibrary`: TMDB id or title+year) are dropped, the rest become "Collection: Title" cards with a
   released/releases date note. Collections are fetched once per collection id (promise-cached, so owning
