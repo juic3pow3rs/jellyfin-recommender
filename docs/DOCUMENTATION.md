@@ -76,7 +76,9 @@ InitializeJellyfin(explicitLogin)                  explicitLogin = Connect butto
 | `people` | `#people-container` | One section per actor/director (their other works), random pick above the slider threshold | Type, TMDB key, Min. appearances slider, Shuffle |
 | `upcoming` | `#upcoming-container` | Future-dated releases feed | Type, TMDB key |
 
-`switchPage(page)` shows/hides the `.page` sections (`.page[hidden], #recommendations-container[hidden] {
+The `#filter-bar` is shared across all pages (it sits in `#pages` above the `.page` sections — not inside
+`<main>`, otherwise it would be hidden with the recommendations page). `switchPage(page)` shows/hides the
+`.page` sections (`.page[hidden], #recommendations-container[hidden] {
 display: none }` — the ID-qualified rule is required because `#recommendations-container { display: flex }`
 would otherwise win by specificity and keep `main` visible on every page) and the `data-group` filter-bar groups, then
 `loadCurrentPage()` recomputes the active page. Changing a toggle (or Shuffle / the TMDB key) calls

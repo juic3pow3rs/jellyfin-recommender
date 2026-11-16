@@ -56,34 +56,34 @@
       <button type="button" class="page-btn" data-page="people" aria-pressed="false">Actors &amp; directors</button>
       <button type="button" class="page-btn" data-page="upcoming" aria-pressed="false">Upcoming</button>
     </nav>
+            <div id="filter-bar" class="filter-bar" hidden>
+      <div class="toggle-group" data-group="all" role="group" aria-label="Content type">
+        <span class="toggle-label" id="typeToggleLabel">Type:</span>
+        <button type="button" class="toggle-btn" data-type="Movie" aria-pressed="true">Movies</button>
+        <button type="button" class="toggle-btn" data-type="Series" aria-pressed="false">Shows</button>
+      </div>
+      <div class="toggle-group" data-group="recommendations" role="group" aria-label="Recommendation base">
+        <span class="toggle-label" id="scopeToggleLabel">Base:</span>
+        <button type="button" class="toggle-btn" data-scope="watched" aria-pressed="true">Watched only</button>
+        <button type="button" class="toggle-btn" data-scope="all" aria-pressed="false">Whole library</button>
+      </div>
+      <div class="toggle-group" data-group="recommendations" role="group" aria-label="Recommendation source">
+        <span class="toggle-label" id="sourceToggleLabel">Source:</span>
+        <button type="button" class="toggle-btn" data-source="library" aria-pressed="true">In library</button>
+        <button type="button" class="toggle-btn" data-source="new" aria-pressed="false">New (TMDB)</button>
+      </div>
+      <div class="toggle-group tmdb-key-group" data-group="all">
+        <label class="toggle-label" for="tmdbApiKey">TMDB API key:</label>
+        <input type="password" id="tmdbApiKey" placeholder="needed for the TMDB views" autocomplete="off">
+      </div>
+      <div class="toggle-group people-slider-group" data-group="people">
+        <label class="toggle-label" for="peopleMinSlider">Min. appearances:</label>
+        <input type="range" id="peopleMinSlider" min="1" max="10" step="1" value="2">
+        <span class="toggle-label" id="peopleMinValue">2</span>
+      </div>
+      <button type="button" id="shuffleBtn" data-group="all" class="shuffle-btn" title="Pick others randomly and recompute (anchors on Recommendations, people on Actors &amp; directors)"><i class="fa-solid fa-shuffle"></i> Shuffle</button>
+    </div>
     <main id="recommendations-container" class="page" data-page="recommendations">
-        <div id="filter-bar" class="filter-bar" hidden>
-          <div class="toggle-group" data-group="all" role="group" aria-label="Content type">
-            <span class="toggle-label" id="typeToggleLabel">Type:</span>
-            <button type="button" class="toggle-btn" data-type="Movie" aria-pressed="true">Movies</button>
-            <button type="button" class="toggle-btn" data-type="Series" aria-pressed="false">Shows</button>
-          </div>
-          <div class="toggle-group" data-group="recommendations" role="group" aria-label="Recommendation base">
-            <span class="toggle-label" id="scopeToggleLabel">Base:</span>
-            <button type="button" class="toggle-btn" data-scope="watched" aria-pressed="true">Watched only</button>
-            <button type="button" class="toggle-btn" data-scope="all" aria-pressed="false">Whole library</button>
-          </div>
-          <div class="toggle-group" data-group="recommendations" role="group" aria-label="Recommendation source">
-            <span class="toggle-label" id="sourceToggleLabel">Source:</span>
-            <button type="button" class="toggle-btn" data-source="library" aria-pressed="true">In library</button>
-            <button type="button" class="toggle-btn" data-source="new" aria-pressed="false">New (TMDB)</button>
-          </div>
-          <div class="toggle-group tmdb-key-group" data-group="all">
-            <label class="toggle-label" for="tmdbApiKey">TMDB API key:</label>
-            <input type="password" id="tmdbApiKey" placeholder="needed for the TMDB views" autocomplete="off">
-          </div>
-          <div class="toggle-group people-slider-group" data-group="people">
-            <label class="toggle-label" for="peopleMinSlider">Min. appearances:</label>
-            <input type="range" id="peopleMinSlider" min="1" max="10" step="1" value="2">
-            <span class="toggle-label" id="peopleMinValue">2</span>
-          </div>
-          <button type="button" id="shuffleBtn" data-group="all" class="shuffle-btn" title="Pick others randomly and recompute (anchors on Recommendations, people on Actors &amp; directors)"><i class="fa-solid fa-shuffle"></i> Shuffle</button>
-        </div>
         <div id="taste-recommendations-container" class="because-you-watched-container"></div>
         <div id="new-content-container" class="because-you-watched-container"></div>
         <!-- Content recommendations will be loaded here -->
