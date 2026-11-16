@@ -25,12 +25,15 @@ test('index.html loads the vendored copies, not the live sites of the other repo
 test('index.html has the filter toggles and the external-recommendation controls', () => {
   const html = read('index.html');
   assert.match(html, /id="filter-bar"/);
-  for (const v of ['data-type="Movie"', 'data-type="Series"', 'data-scope="watched"', 'data-scope="all"', 'data-source="library"', 'data-source="new"', 'id="tmdbApiKey"', 'id="new-content-container"', 'id="shuffleBtn"', 'id="upcoming-container"', 'data-page="recommendations"', 'data-page="completeness"', 'data-page="people"', 'data-page="upcoming"', 'id="page-completeness"', 'id="page-people"', 'id="page-upcoming"', 'id="completeness-container"', 'id="people-container"'])
+  for (const v of ['data-type="Movie"', 'data-type="Series"', 'data-scope="watched"', 'data-scope="all"', 'data-source="library"', 'data-source="new"', 'id="tmdbApiKey"', 'id="new-content-container"', 'id="shuffleBtn"', 'id="upcoming-container"', 'data-page="recommendations"', 'data-page="completeness"', 'data-page="people"', 'data-page="upcoming"', 'id="page-completeness"', 'id="page-people"', 'id="page-upcoming"', 'id="completeness-container"', 'id="people-container"', 'id="peopleMinSlider"', 'id="peopleMinValue"'])
     assert.ok(html.includes(v), v);
   assert.match(html, /src="tmdb\.js"/);
   // Required by the TMDB API terms of use (attribution)
   assert.ok(html.includes('uses the'), 'TMDB attribution notice missing');
   assert.ok(/TMDB<\/a> API but is not endorsed or certified by TMDB/.test(html), 'TMDB attribution text missing');
+  // The Music library (Audio) is not used by this app and must not be fetched
+  const js = read('script.js');
+  assert.ok(!/IncludeItemsTypes\s*=\s*\[[^\]]*"Audio"/.test(js), 'Audio must not be in IncludeItemsTypes');
 });
 
 test('external section size and TMDB rate-limit cap are configured in the sources', () => {
@@ -237,8 +240,8 @@ const upcomingMocks = () => {
       if (url.includes('/genre/')) return genreList;
       if (url.includes('/search/tv')) return search;
       if (url.includes('/tv/300')) return tvDetails;
-      if (url.includes('/movie/100/credits')) return credits;
-      if (url.includes('/movie/100?')) return movieDetails;
+      if (url.includes('/movie/100/credits') || url.includes('/movie/101/credits')) return credits;
+      if (url.includes('/movie/100?') || url.includes('/movie/102?')) return movieDetails;
       if (url.includes('/collection/999')) return collection;
       if (url.includes('/person/55/')) return person55;
       if (url.includes('/person/66/')) return person66;
@@ -276,13 +279,43 @@ test('tmdb.js: getMissingSequels excludes library parts by tmdb id AND by title+
   assert.ok(cards.find(c => c.TmdbId === '102').Name.includes('Anchor Collection'));
 });
 
-test('tmdb.js: getFavoritePeopleWorks groups works by actor/director with date notes', async () => {
+test('tmdb.js: getPeopleAppearances counts appearances across the library; slider filters them', async () => {
   const ctx = loadTmdb(upcomingMocks(), { setTimeout: (cb) => cb() });
+  const getApp = vm.runInContext('getPeopleAppearances', ctx);
   const getPeople = vm.runInContext('getFavoritePeopleWorks', ctx);
-  const anchor = { Id: 'm1', Name: 'Anchor', Type: 'Movie', ProviderIds: { Tmdb: '100' }, UserData: { Played: true } };
-  const { actors, directors } = await getPeople([anchor], [anchor], 'Movie', 'KEY');
-  assert.ok(actors.some(c => c.Name === 'Actor Movie' && c.note.includes('with Star Actor')), JSON.stringify(actors.map(a => a.note)));
-  assert.ok(directors.some(c => c.Name === 'Director Movie' && c.note.includes('by Top Director') && c.note.includes('releases 2099-03-01')));
+  const m1 = { Id: 'm1', Name: 'Anchor', Type: 'Movie', ProviderIds: { Tmdb: '100' } };
+  const m2 = { Id: 'm2', Name: 'Anchor 2', Type: 'Movie', ProviderIds: { Tmdb: '101' } };
+  const appearances = await getApp([m1, m2], 'Movie', 'KEY');
+  assert.equal(appearances.get('actor-55').count, 2, 'actor in both movies counts 2');
+  assert.equal(appearances.get('director-66').count, 2, 'director in both movies counts 2');
+
+  // min 2 -> both are eligible; one section per person, heading = person name + count
+  const groups = await getPeople({ items: [m1, m2], libraryItems: [m1, m2], type: 'Movie', apiKey: 'KEY', minAppearances: 2 });
+  assert.equal(groups.length, 2, 'one group per picked person');
+  const actorGroup = groups.find(g => g.role === 'actor');
+  assert.ok(actorGroup.heading.includes('Star Actor') && actorGroup.heading.includes('2×'), actorGroup.heading);
+  assert.ok(actorGroup.items.some(c => c.Name === 'Actor Movie' && c.note.includes('with Star Actor') && c.source === 'actors'));
+  const directorGroup = groups.find(g => g.role === 'director');
+  assert.ok(directorGroup.heading.includes('Top Director') && directorGroup.items.some(c => c.Name === 'Director Movie' && c.source === 'directors'));
+
+  // min 3 -> nobody passes the slider
+  const none = await getPeople({ items: [m1, m2], libraryItems: [m1, m2], type: 'Movie', apiKey: 'KEY', minAppearances: 3 });
+  assert.equal(none.length, 0);
+});
+
+test('tmdb.js: getMissingSequels dedupes the collection request and the parts across movies', async () => {
+  let collectionCalls = 0;
+  const base = upcomingMocks();
+  const fetchMock = async (url) => { if (url.includes('/collection/999')) collectionCalls++; return base(url); };
+  const ctx = loadTmdb(fetchMock, { setTimeout: (cb) => cb() });
+  const getSeq = vm.runInContext('getMissingSequels', ctx);
+  const m1 = { Id: 'm1', Name: 'Anchor', Type: 'Movie', ProviderIds: { Tmdb: '100' } };
+  const m3 = { Id: 'm3', Name: 'Anchor Part 3', Type: 'Movie', ProviderIds: { Tmdb: '102' } }; // owns part 3 -> parts 1+2 missing
+  const cards = await getSeq([m1, m3], [m1, m3], 'KEY');
+  assert.equal(collectionCalls, 1, 'one collection request for two movies of the same collection');
+  assert.equal(cards.length, 1, 'only the missing part remains, emitted once');
+  assert.equal(cards[0].TmdbId, '101');
+  assert.equal(cards[0].source, 'collections');
 });
 
 test('tmdb.js: getUpcomingReleases returns only future-dated items, sorted by date', async () => {

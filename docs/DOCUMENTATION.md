@@ -73,7 +73,7 @@ InitializeJellyfin(explicitLogin)                  explicitLogin = Connect butto
 |---|---|---|---|
 | `recommendations` | `#recommendations-container` | source `library`: taste section + "Because you watched" groups; source `new`: "New to your library" groups (TMDB) | Type, Base (scope), Source, TMDB key, Shuffle |
 | `completeness` | `#completeness-container` | Shows: missing/upcoming seasons; Movies: missing collection parts | Type, TMDB key |
-| `people` | `#people-container` | More works of favorite actors/directors | Type, TMDB key |
+| `people` | `#people-container` | One section per actor/director (their other works), random pick above the slider threshold | Type, TMDB key, Min. appearances slider, Shuffle |
 | `upcoming` | `#upcoming-container` | Future-dated releases feed | Type, TMDB key |
 
 `switchPage(page)` shows/hides the `.page` sections and the `data-group` filter-bar groups, then
@@ -195,14 +195,20 @@ through the throttled `tmdbFetch` (≤ `TMDB_MAX_REQ_PER_SEC = 40` req/s, 429 �
   `/tv/{id}` lists all seasons (season 0 "Specials" ignored); seasons not owned become cards titled with the
   show name, note "Season N aired <date>" / "Season N releases <date>", poster = season poster (fallback: series
   poster), linking to the TMDB season page.
-- **Completeness — movies** (`getMissingSequels`): per library movie (max `UPCOMING_MAX_MOVIES = 20`), TMDB
+- **Completeness — movies** (`getMissingSequels`): per library movie (max `UPCOMING_MAX_MOVIES = 100`), TMDB
   `/movie/{id}` → `belongs_to_collection` → `/collection/{id}` parts; parts already in the library
   (`isInLibrary`: TMDB id or title+year) are dropped, the rest become "Collection: Title" cards with a
-  released/releases date note. (Standalone sequels outside a TMDB collection cannot be detected.)
-- **Actors & directors** (`getFavoritePeopleWorks`): credits of up to `UPCOMING_MAX_CREDIT_ANCHORS = 8`
-  watched items of the type are aggregated → top `UPCOMING_MAX_ACTORS = 5` actors + `UPCOMING_MAX_DIRECTORS = 3`
-  directors → `/person/{id}/combined_credits`, filtered to the selected type and against the library, noted
-  "with/by <name> · released/releases <date>", ranked by rating/popularity (12 cards each).
+  released/releases date note. Collections are fetched once per collection id (promise-cached, so owning
+  part 3 of a trilogy is enough to surface parts 1+2) and parts are deduped across movies. (Standalone
+  sequels outside a TMDB collection cannot be detected.)
+- **Actors & directors** (`getPeopleAppearances` + `getFavoritePeopleWorks`): appearances are counted across
+  up to `PEOPLE_MAX_TITLES = 60` library titles of the type (movies: 1 per title via `/credits`; series:
+  `total_episode_count` via `/tv/{id}/aggregate_credits`, so episodes count for shows). People with
+  `count >= minAppearances` (the slider, `recommender.peopleMin`, default 2) are picked **randomly**
+  (`selectRandomContents`) — up to `UPCOMING_MAX_ACTORS = 5` actors + `UPCOMING_MAX_DIRECTORS = 3` directors —
+  and each gets one section (heading "Name (N× in your library)") with their `/person/{id}/combined_credits`
+  works, filtered to the type and against the library, noted "with/by <name> · released/releases <date>",
+  ranked by rating/popularity (12 cards each).
 - **Upcoming** (`getUpcomingReleases` + `groupUpcomingBySource`): missing seasons/sequels of the type + works
   of the favorite actors/directors, filtered to future `ReleaseDate`, sorted by date (max 24). Every card
   carries `source` (`seasons` / `collections` / `actors` / `directors`) and the page renders one grid per
@@ -237,7 +243,7 @@ placeholder, so no external placeholder host is needed.
 | Where | Key | Content |
 |---|---|---|
 | `localStorage` | `server` | Server address |
-| `localStorage` | `recommender.type` / `recommender.scope` / `recommender.source` / `recommender.page` | Type/scope/source toggles and the active page |
+| `localStorage` | `recommender.type` / `recommender.scope` / `recommender.source` / `recommender.page` / `recommender.peopleMin` | Type/scope/source toggles, active page, min-appearances slider |
 | `localStorage` | `tmdbApiKey` | TMDB API key for external recommendations (sent only to `api.themoviedb.org`) |
 | `localStorage` | `jellyfinAuth` | Session `{ server, serverId, userId, token }` (`Jellyfin` class; never the password) |
 | `localStorage` | `username`, `password` | Only from old versions: used once to get the token, then deleted |

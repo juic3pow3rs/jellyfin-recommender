@@ -17,7 +17,7 @@ This project is a web application that leverages your Jellyfin server to recomme
 *   **Four views (nav bar on top):**
     *   **Recommendations** — toggles: Movies/Shows, Watched only/Whole library, Source: **In library** or **New (TMDB)**. "New (TMDB)" recommends movies/shows **not in your Jellyfin library yet** (TMDB similar/recommended titles of your watched anchors, minus anything you own, ranked with the same similarity algorithm; cards open on TMDB). Plus a **Shuffle** button that re-rolls the anchor titles.
     *   **Collection completeness** — toggle Movies/Shows, always based on the whole library: missing/upcoming seasons of your shows (with air dates), or sequel "part x" of your movies via TMDB collections.
-    *   **Actors & directors** — toggle Movies/Shows, whole library: more works of your most frequent actors/directors (from the credits of your watched titles), minus what you already have.
+    *   **Actors & directors** — toggle Movies/Shows, whole library, plus a **Min. appearances** slider (e.g. 4 = the person must appear in at least 4 of your movies/episodes): one section per actor/director (their name as the heading) listing their other works, minus what you already have. People above the threshold are picked randomly — the Shuffle button re-rolls them.
     *   **Upcoming** — toggle Movies/Shows, whole library: a feed of everything above with a future release date.
     *   The last three views use TMDB with your own free API key (see below); anything already in your library is excluded everywhere.
 *   **Configurable Similarity:** The `findSimilar.js` file allows you to adjust the weights for different attributes (genres, tags, rating, year, title) to fine-tune the recommendation algorithm.

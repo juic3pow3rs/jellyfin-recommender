@@ -220,8 +220,8 @@ async function getExternalRecommendations(anchors, libraryItems, type, apiKey, {
 // from an old cache or a Meilisearch load still work. Everything goes through the throttled tmdbFetch.
 // ======================
 const UPCOMING_MAX_SERIES = 40;        // tv-details requests for season completeness
-const UPCOMING_MAX_MOVIES = 20;        // movie-details + collection requests for sequels
-const UPCOMING_MAX_CREDIT_ANCHORS = 8; // watched titles whose credits build the favorite people
+const UPCOMING_MAX_MOVIES = 100;       // movie-details requests for sequels (collections are deduped, see below)
+const PEOPLE_MAX_TITLES = 60;          // library titles scanned for actor/director appearances
 const UPCOMING_MAX_ACTORS = 5;
 const UPCOMING_MAX_DIRECTORS = 3;
 
@@ -309,7 +309,9 @@ async function getMissingSeasons(series, ownedSeasons, apiKey) {
   return cards;
 }
 
-// Page 2 (movies): collection parts ("part x") of the given library movies that are not in the library
+// Page 2 (movies): collection parts ("part x") of the given library movies that are not in the library.
+// Collections are cached per collection id and parts deduped, so scanning many movies that share a
+// collection (e.g. you own part 3 of a trilogy) costs one collection request, not one per movie.
 async function getMissingSequels(movies, libraryItems, apiKey) {
   if (!apiKey) return [];
   const genreMap = await tmdbGenreMap('Movie', apiKey);
@@ -317,16 +319,26 @@ async function getMissingSequels(movies, libraryItems, apiKey) {
   const titleIndex = buildLibraryTitleIndex(libraryItems);
   const today = new Date().toISOString().slice(0, 10);
   const cards = [];
+  const collectionCache = new Map(); // collectionId -> Promise<collection> (promise, so concurrent movies share one request)
+  const seenParts = new Set();       // tmdb ids already emitted
   await Promise.all((movies || []).slice(0, UPCOMING_MAX_MOVIES).map(async m => {
     const tmdbId = await resolveAnchorTmdbId(m, 'Movie', apiKey);
     if (!tmdbId) return;
+    let cid;
+    try { cid = await tmdbMovieCollectionId(tmdbId, apiKey); }
+    catch (e) { console.warn(`TMDB movie details failed for "${m.Name}":`, e.message); return; }
+    if (!cid) return;
+    let pending = collectionCache.get(cid);
+    if (!pending) {
+      pending = tmdbCollection(cid, apiKey, genreMap).catch(e => { collectionCache.delete(cid); throw e; });
+      collectionCache.set(cid, pending);
+    }
     let collection;
-    try {
-      const cid = await tmdbMovieCollectionId(tmdbId, apiKey);
-      if (!cid) return;
-      collection = await tmdbCollection(cid, apiKey, genreMap);
-    } catch (e) { console.warn(`TMDB collection failed for "${m.Name}":`, e.message); return; }
+    try { collection = await pending; }
+    catch (e) { console.warn(`TMDB collection failed for "${m.Name}":`, e.message); return; }
     for (const p of collection.parts) {
+      if (seenParts.has(p.TmdbId)) continue;
+      seenParts.add(p.TmdbId);
       if (isInLibrary(p, libraryIds, titleIndex)) continue;
       cards.push({ ...p, Name: `${collection.name}: ${p.Name}`, source: 'collections', note: !p.ReleaseDate ? 'No date yet' : (p.ReleaseDate > today ? `Releases ${p.ReleaseDate}` : `Released ${p.ReleaseDate}`) });
     }
@@ -334,46 +346,70 @@ async function getMissingSequels(movies, libraryItems, apiKey) {
   return cards;
 }
 
-// Page 3: other works (of the given type) of the most frequent actors/directors among the anchor items
-async function getFavoritePeopleWorks(anchors, libraryItems, type, apiKey) {
-  const empty = { actors: [], directors: [] };
-  if (!apiKey) return empty;
+// Appearances of actors/directors across the given library titles. Movies count 1 per title (cast/crew);
+// series count total_episode_count from TMDB aggregate_credits, so episodes are counted for shows.
+async function getPeopleAppearances(items, type, apiKey) {
+  const people = new Map();
+  const bump = (p, role, count) => {
+    const key = `${role}-${p.id}`;
+    const e = people.get(key) || { id: p.id, name: p.name, role, count: 0 };
+    e.count += count;
+    people.set(key, e);
+  };
+  const isSeries = type === 'Series';
+  await Promise.all((items || []).slice(0, PEOPLE_MAX_TITLES).map(async item => {
+    const tmdbId = await resolveAnchorTmdbId(item, type, apiKey);
+    if (!tmdbId) return;
+    try {
+      if (isSeries) {
+        const data = await tmdbFetch(`/tv/${tmdbId}/aggregate_credits?language=en-US`, apiKey);
+        for (const c of data.cast || []) bump({ id: c.id, name: c.name }, 'actor', c.total_episode_count || 1);
+        for (const c of data.crew || []) {
+          const jobs = (c.jobs || []).map(j => j.job);
+          if (c.job === 'Director' || jobs.includes('Director')) bump({ id: c.id, name: c.name }, 'director', c.total_episode_count || 1);
+        }
+      } else {
+        const credits = await tmdbCredits(tmdbId, 'Movie', apiKey);
+        for (const c of credits.cast) bump(c, 'actor', 1);
+        for (const d of credits.directors) bump(d, 'director', 1);
+      }
+    } catch (e) { console.warn(`TMDB credits failed for "${item.Name}":`, e.message); }
+  }));
+  return people;
+}
+
+// Page 3: one section per actor/director. Appearances are counted across the whole library of the type,
+// filtered by minAppearances (the slider), then picked RANDOMLY (selectRandomContents) so Shuffle re-rolls
+// them. Returns [{ heading, role, person, items }].
+async function getFavoritePeopleWorks({ items, libraryItems, type, apiKey, minAppearances = 1, maxActors = UPCOMING_MAX_ACTORS, maxDirectors = UPCOMING_MAX_DIRECTORS, perPerson = 12 }) {
+  if (!apiKey) return [];
   const genreMap = { ...(await tmdbGenreMap('Movie', apiKey)), ...(await tmdbGenreMap('Series', apiKey)) };
   const libraryIds = buildLibraryTmdbIds(libraryItems);
   const titleIndex = buildLibraryTitleIndex(libraryItems);
   const today = new Date().toISOString().slice(0, 10);
-  const people = new Map();
-  const bump = (p, role) => {
-    const key = `${role}-${p.id}`;
-    const e = people.get(key) || { id: p.id, name: p.name, role, count: 0 };
-    e.count++;
-    people.set(key, e);
-  };
-  await Promise.all((anchors || []).slice(0, UPCOMING_MAX_CREDIT_ANCHORS).map(async a => {
-    const tmdbId = await resolveAnchorTmdbId(a, type, apiKey);
-    if (!tmdbId) return;
-    let credits;
-    try { credits = await tmdbCredits(tmdbId, type, apiKey); }
-    catch (e) { console.warn(`TMDB credits failed for "${a.Name}":`, e.message); return; }
-    credits.cast.forEach(c => bump(c, 'actor'));
-    credits.directors.forEach(d => bump(d, 'director'));
-  }));
-  const topPeople = (role, n) => [...people.values()].filter(p => p.role === role).sort((x, y) => y.count - x.count).slice(0, n);
-  const actorCards = [], directorCards = [];
-  await Promise.all([...topPeople('actor', UPCOMING_MAX_ACTORS), ...topPeople('director', UPCOMING_MAX_DIRECTORS)].map(async person => {
+  const appearances = await getPeopleAppearances(items, type, apiKey);
+  const eligible = [...appearances.values()].filter(p => p.count >= minAppearances);
+  const picked = [
+    ...selectRandomContents(eligible.filter(p => p.role === 'actor'), maxActors),
+    ...selectRandomContents(eligible.filter(p => p.role === 'director'), maxDirectors)
+  ];
+  const groups = await Promise.all(picked.map(async person => {
     let works;
     try { works = await tmdbPersonWorks(person.id, apiKey, genreMap); }
-    catch (e) { console.warn(`TMDB person credits failed for ${person.name}:`, e.message); return; }
+    catch (e) { console.warn(`TMDB person credits failed for ${person.name}:`, e.message); return null; }
+    const cards = [];
     for (const w of works) {
       if (w.Type !== type) continue;
       if (isInLibrary(w, libraryIds, titleIndex)) continue;
       const future = !!w.ReleaseDate && w.ReleaseDate > today;
-      const card = { ...w, source: person.role === 'actor' ? 'actors' : 'directors', note: `${person.role === 'actor' ? 'with' : 'by'} ${person.name}` + (w.ReleaseDate ? ` · ${future ? 'releases' : 'released'} ${w.ReleaseDate}` : '') };
-      (person.role === 'actor' ? actorCards : directorCards).push(card);
+      cards.push({ ...w, source: person.role === 'actor' ? 'actors' : 'directors', note: `${person.role === 'actor' ? 'with' : 'by'} ${person.name}` + (w.ReleaseDate ? ` · ${future ? 'releases' : 'released'} ${w.ReleaseDate}` : '') });
     }
+    const byRating = (a, b) => (b.CommunityRating || 0) - (a.CommunityRating || 0) || (b.Popularity || 0) - (a.Popularity || 0);
+    cards.sort(byRating);
+    return { heading: `${person.name} (${person.count}× in your library)`, role: person.role, person, items: cards.slice(0, perPerson) };
   }));
-  const byRating = (a, b) => (b.CommunityRating || 0) - (a.CommunityRating || 0) || (b.Popularity || 0) - (a.Popularity || 0);
-  return { actors: actorCards.sort(byRating).slice(0, 12), directors: directorCards.sort(byRating).slice(0, 12) };
+  // actors first, then directors (stable, readable order)
+  return groups.filter(Boolean).sort((a, b) => (a.role === b.role ? 0 : a.role === 'actor' ? -1 : 1));
 }
 
 // Page 4: everything with a future release date — missing seasons/sequels of the type + people works.
@@ -397,8 +433,8 @@ async function getUpcomingReleases({ items, watchedItems, libraryItems, ownedSea
   let cards = type === 'Series'
     ? await getMissingSeasons(items, ownedSeasons, apiKey)
     : await getMissingSequels(items, libraryItems, apiKey);
-  const people = await getFavoritePeopleWorks(watchedItems, libraryItems, type, apiKey);
-  cards = cards.concat(people.actors, people.directors);
+  const peopleGroups = await getFavoritePeopleWorks({ items, libraryItems, type, apiKey, minAppearances: 1 });
+  cards = cards.concat(peopleGroups.flatMap(g => g.items));
   return cards
     .filter(c => c.ReleaseDate && c.ReleaseDate > today)
     .sort((a, b) => a.ReleaseDate.localeCompare(b.ReleaseDate))
