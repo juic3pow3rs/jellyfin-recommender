@@ -31,6 +31,9 @@ test('index.html has the filter toggles and the external-recommendation controls
   // Required by the TMDB API terms of use (attribution)
   assert.ok(html.includes('uses the'), 'TMDB attribution notice missing');
   assert.ok(/TMDB<\/a> API but is not endorsed or certified by TMDB/.test(html), 'TMDB attribution text missing');
+  // The filter bar must be shared across pages: it sits in #pages before <main>, not inside it
+  // (inside main it would be hidden together with the recommendations page on the other views)
+  assert.ok(html.indexOf('id="filter-bar"') < html.indexOf('<main id="recommendations-container"'), 'filter-bar must come before/outside <main>');
   // Only Movies and Shows are used by this app — the fetch must not include Audio/Video/Book
   const js = read('script.js');
   assert.ok(/IncludeItemsTypes\s*=\s*\[\s*"Movie",\s*"Series",?\s*\]/.test(js), 'IncludeItemsTypes must be exactly [Movie, Series], got: ' + (js.match(/IncludeItemsTypes\s*=\s*\[[^\]]*\]/) || ['?'])[0]);

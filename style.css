@@ -147,13 +147,17 @@ body {
   display: inline-flex; /* Use flex for alignment */
 }
 
-/* Filter Bar (Movies/Shows, Watched only/Whole library) */
+/* Filter Bar — shared across all pages (sits in #pages, above the .page sections; switchPage shows only
+   the data-group toggles relevant to the active page) */
 .filter-bar {
   display: flex;
   flex-wrap: wrap;
   gap: 1rem 2rem;
   align-items: center;
-  margin-bottom: -1rem; /* The container's section gap is large; tighten it here */
+  max-width: 1400px;
+  width: 100%;
+  margin: 0 auto 0.5rem auto;
+  padding: 0 1.5rem;
 }
 
 .filter-bar[hidden] {
