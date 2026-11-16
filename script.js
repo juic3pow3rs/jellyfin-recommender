@@ -36,6 +36,9 @@ const filterState = {
 if (!RECOMMENDABLE_TYPES.includes(filterState.type)) filterState.type = 'Movie';
 if (!['watched', 'all'].includes(filterState.scope)) filterState.scope = 'watched';
 if (!['library', 'new'].includes(filterState.source)) filterState.source = 'library';
+// Min. appearances slider on the Actors & directors page (1-10)
+const clampPeopleMin = v => Math.min(10, Math.max(1, parseInt(v) || 1));
+filterState.peopleMin = clampPeopleMin(localStorage.getItem('recommender.peopleMin') ?? 2);
 if (tmdbKeyInput) tmdbKeyInput.value = localStorage.getItem('tmdbApiKey') || '';
 
 // --- Pages (views): recommendations / completeness / people / upcoming ---
@@ -300,7 +303,7 @@ function InitializeJellyfin(explicitLogin = false) {
       document.getElementById('loginErrorMessage').innerText = "";
       // Trigger library load after successful login
       if (window.jellyfin.onLibraryLoad) {
-          window.jellyfin.IncludeItemsTypes = ["Audio", "Video", "Book", "Movie", "Series", ]
+          window.jellyfin.IncludeItemsTypes = ["Video", "Book", "Movie", "Series", ] // no Audio: the Music library is not used by this app
           window.jellyfin.onLibraryLoad(); // Call the callback if it exists
       }
     },
@@ -779,7 +782,7 @@ async function loadCompletenessPage() {
   }
 }
 
-// --- Page 3: favorite actors & directors — whole library of the selected type ---
+// --- Page 3: actors & directors — one section per person, whole library of the selected type ---
 async function loadPeoplePage() {
   const container = document.getElementById('people-container');
   if (!container) return;
@@ -789,16 +792,32 @@ async function loadPeoplePage() {
   try {
     const all = await getList(null, 'All', null);
     const ofType = filterByContentType(all, filterState.type);
-    let anchors = ofType.filter(i => i?.UserData?.Played);
-    if (!anchors.length) anchors = ofType; // nothing played of this type: fall back to the whole type
-    const { actors, directors } = await getFavoritePeopleWorks(anchors, all, filterState.type, apiKey);
-    pageTitle(container, filterState.type === 'Series' ? 'Your favorite actors & directors — shows' : 'Your favorite actors & directors — movies');
-    renderCardsGrid(container, 'More from your favorite actors', actors);
-    renderCardsGrid(container, 'More from your favorite directors', directors);
+    // people are filtered by the min-appearances slider and picked randomly (Shuffle re-rolls them)
+    const groups = await getFavoritePeopleWorks({ items: ofType, libraryItems: all, type: filterState.type, apiKey, minAppearances: filterState.peopleMin });
+    pageTitle(container, filterState.type === 'Series' ? 'Actors & directors in your shows' : 'Actors & directors in your movies');
+    if (!groups.length) {
+      hintIn(container, `No actors/directors with at least ${filterState.peopleMin} appearance(s) in your library — lower the slider.`);
+      return;
+    }
+    for (const g of groups) renderCardsGrid(container, g.heading, g.items); // heading = person name
   } catch (error) {
     console.error('Error loading favorite people:', error);
     hintIn(container, `Error loading actors & directors (${error.message}).`);
   }
+}
+
+// Min-appearances slider (Actors & directors page)
+const peopleMinSlider = document.getElementById('peopleMinSlider');
+const peopleMinValue = document.getElementById('peopleMinValue');
+if (peopleMinSlider) {
+  peopleMinSlider.value = String(filterState.peopleMin);
+  if (peopleMinValue) peopleMinValue.textContent = String(filterState.peopleMin);
+  peopleMinSlider.addEventListener('input', () => { if (peopleMinValue) peopleMinValue.textContent = peopleMinSlider.value; });
+  peopleMinSlider.addEventListener('change', () => {
+    filterState.peopleMin = clampPeopleMin(peopleMinSlider.value);
+    localStorage.setItem('recommender.peopleMin', String(filterState.peopleMin));
+    if (window.jellyfin?.isAuthenticated) refreshRecommendations();
+  });
 }
 
 // --- Page 4: upcoming releases feed — future-dated items only, whole library of the selected type ---
