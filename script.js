@@ -9,7 +9,7 @@ const cleanMemoryBtn = document.getElementById('cleanMemoryBtn');
 const recommendationsContainer = document.getElementById('recommendations-container');
 
 // Item types that can be recommended (playlists, collections, channels… are not)
-const RECOMMENDABLE_TYPES = ["Audio", "Video", "Book", "Movie", "Series"];
+const RECOMMENDABLE_TYPES = ["Movie", "Series"]; // this app only works with movies and shows
 
 let ContentsToCheck = 3;
 let similarsToShow = 6;
@@ -303,7 +303,7 @@ function InitializeJellyfin(explicitLogin = false) {
       document.getElementById('loginErrorMessage').innerText = "";
       // Trigger library load after successful login
       if (window.jellyfin.onLibraryLoad) {
-          window.jellyfin.IncludeItemsTypes = ["Video", "Book", "Movie", "Series", ] // no Audio: the Music library is not used by this app
+          window.jellyfin.IncludeItemsTypes = ["Movie", "Series", ] // only what this app uses — no Audio/Video/Book fetch
           window.jellyfin.onLibraryLoad(); // Call the callback if it exists
       }
     },
