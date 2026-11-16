@@ -31,9 +31,9 @@ test('index.html has the filter toggles and the external-recommendation controls
   // Required by the TMDB API terms of use (attribution)
   assert.ok(html.includes('uses the'), 'TMDB attribution notice missing');
   assert.ok(/TMDB<\/a> API but is not endorsed or certified by TMDB/.test(html), 'TMDB attribution text missing');
-  // The Music library (Audio) is not used by this app and must not be fetched
+  // Only Movies and Shows are used by this app — the fetch must not include Audio/Video/Book
   const js = read('script.js');
-  assert.ok(!/IncludeItemsTypes\s*=\s*\[[^\]]*"Audio"/.test(js), 'Audio must not be in IncludeItemsTypes');
+  assert.ok(/IncludeItemsTypes\s*=\s*\[\s*"Movie",\s*"Series",?\s*\]/.test(js), 'IncludeItemsTypes must be exactly [Movie, Series], got: ' + (js.match(/IncludeItemsTypes\s*=\s*\[[^\]]*\]/) || ['?'])[0]);
 });
 
 test('external section size and TMDB rate-limit cap are configured in the sources', () => {

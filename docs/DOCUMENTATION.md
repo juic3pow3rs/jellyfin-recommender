@@ -194,19 +194,21 @@ through the throttled `tmdbFetch` (≤ `TMDB_MAX_REQ_PER_SEC = 40` req/s, 429 �
   (`/Users/{userId}/Items?IncludeItemTypes=Season&Recursive=true`, `getOwnedSeasonsBySeries` in `script.js`)
   maps series id → owned season numbers. Per library series (max `UPCOMING_MAX_SERIES = 40`), TMDB
   `/tv/{id}` lists all seasons (season 0 "Specials" ignored). Per load a random sample of at most
-  `UPCOMING_MAX_SERIES = 40` series is scanned (`selectRandomContents`, so revisits cover different shows);
+  `UPCOMING_MAX_SERIES = 100` series is scanned (below the cap the whole type is scanned; above it a random
+  sample per load, so revisits cover different shows);
   seasons not owned become cards titled with the
   show name, note "Season N aired <date>" / "Season N releases <date>", poster = season poster (fallback: series
   poster), linking to the TMDB season page.
-- **Completeness — movies** (`getMissingSequels`): per library movie (a random sample of at most
-  `UPCOMING_MAX_MOVIES = 100` per load), TMDB
+- **Completeness — movies** (`getMissingSequels`): per library movie (at most `UPCOMING_MAX_MOVIES = 500`
+  per load; below the cap the whole library is scanned), TMDB
   `/movie/{id}` → `belongs_to_collection` → `/collection/{id}` parts; parts already in the library
   (`isInLibrary`: TMDB id or title+year) are dropped, the rest become "Collection: Title" cards with a
   released/releases date note. Collections are fetched once per collection id (promise-cached, so owning
   part 3 of a trilogy is enough to surface parts 1+2) and parts are deduped across movies. (Standalone
   sequels outside a TMDB collection cannot be detected.)
 - **Actors & directors** (`getPeopleAppearances` + `getFavoritePeopleWorks`): appearances are counted across
-  up to `PEOPLE_MAX_TITLES = 60` library titles of the type (movies: 1 per title via `/credits`; series:
+  up to `PEOPLE_MAX_TITLES = 500` library titles of the type (below the cap: all of them; movies: 1 per
+  title via `/credits`; series:
   `total_episode_count` via `/tv/{id}/aggregate_credits`, so episodes count for shows). People with
   `count >= minAppearances` (the slider, `recommender.peopleMin`, default 2) are picked **randomly**
   (`selectRandomContents`) — up to `UPCOMING_MAX_ACTORS = 5` actors + `UPCOMING_MAX_DIRECTORS = 3` directors —
@@ -219,7 +221,10 @@ through the throttled `tmdbFetch` (≤ `TMDB_MAX_REQ_PER_SEC = 40` req/s, 429 �
   source with a heading ("Upcoming seasons of your shows", "Upcoming sequels / collection parts",
   "Upcoming from your favorite actors/directors").
 
-Cards show the note line under the year (`createContentCard` renders `Content.note`); score/rating lines are
+TMDB details/credits/aggregate-credits responses are cached per title for the session
+(`tvDetailsCache` / `movieCollectionIdCache` / `creditsCache`), so revisiting a page or Shuffle does not
+re-hit TMDB for the same title. Cards show the note line under the year (`createContentCard` renders
+`Content.note`); score/rating lines are
 omitted when absent, and titles clamp at 2 lines instead of one-line ellipsis (`.Content-info h3`). Card
 images use a uniform 2:3 poster box with `object-fit: contain` (no cropping) and an inline SVG "No Image"
 placeholder, so no external placeholder host is needed.

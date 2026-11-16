@@ -219,15 +219,28 @@ async function getExternalRecommendations(anchors, libraryItems, type, apiKey, {
 // TMDB ids are resolved through resolveAnchorTmdbId (ProviderIds.Tmdb, else a TMDB title search), so items
 // from an old cache or a Meilisearch load still work. Everything goes through the throttled tmdbFetch.
 // ======================
-const UPCOMING_MAX_SERIES = 40;        // tv-details requests for season completeness (random sample per load)
-const UPCOMING_MAX_MOVIES = 100;       // movie-details requests for sequels (random sample per load; collections deduped, see below)
-const PEOPLE_MAX_TITLES = 60;          // library titles scanned for actor/director appearances
+// Scan caps are safety bounds only: below the cap the WHOLE library of the type is scanned (the Jellyfin
+// fetch itself is always complete); above it a random sample per load keeps the TMDB request count sane.
+// At the 40 req/s throttle, 245 movies ≈ 6 s, 500 ≈ 13 s.
+const UPCOMING_MAX_SERIES = 100;      // tv-details requests for season completeness
+const UPCOMING_MAX_MOVIES = 500;      // movie-details requests for sequels (collections deduped, see below)
+const PEOPLE_MAX_TITLES = 500;         // library titles scanned for actor/director appearances
+
+// Session caches so revisiting a page / Shuffle does not re-hit TMDB for the same title
+const tvDetailsCache = new Map();          // tmdbId -> Promise<details>
+const movieCollectionIdCache = new Map();  // tmdbId -> Promise<collectionId|null>
+const creditsCache = new Map();            // `${type}-${tmdbId}` -> Promise<credits> (or aggregate credits for series)
 const UPCOMING_MAX_ACTORS = 5;
 const UPCOMING_MAX_DIRECTORS = 3;
 
 // TMDB tv details: every season (season 0 = specials is ignored) with its air date and own poster
 async function tmdbTvDetails(tmdbId, apiKey) {
-  const data = await tmdbFetch(`/tv/${tmdbId}?language=en-US`, apiKey);
+  let pending = tvDetailsCache.get(tmdbId);
+  if (!pending) {
+    pending = tmdbFetch(`/tv/${tmdbId}?language=en-US`, apiKey).catch(e => { tvDetailsCache.delete(tmdbId); throw e; });
+    tvDetailsCache.set(tmdbId, pending);
+  }
+  const data = await pending;
   const seasons = (data.seasons || [])
     .filter(s => s.season_number >= 1 && (s.episode_count > 0 || s.air_date))
     .map(s => ({
@@ -242,8 +255,14 @@ async function tmdbTvDetails(tmdbId, apiKey) {
 
 // TMDB movie details: the collection it belongs to (for "part x" sequels)
 async function tmdbMovieCollectionId(tmdbId, apiKey) {
-  const data = await tmdbFetch(`/movie/${tmdbId}?language=en-US`, apiKey);
-  return data.belongs_to_collection?.id ? String(data.belongs_to_collection.id) : null;
+  let pending = movieCollectionIdCache.get(tmdbId);
+  if (!pending) {
+    pending = tmdbFetch(`/movie/${tmdbId}?language=en-US`, apiKey)
+      .then(data => (data.belongs_to_collection?.id ? String(data.belongs_to_collection.id) : null))
+      .catch(e => { movieCollectionIdCache.delete(tmdbId); throw e; });
+    movieCollectionIdCache.set(tmdbId, pending);
+  }
+  return pending;
 }
 
 async function tmdbCollection(collectionId, apiKey, genreMap) {
@@ -251,14 +270,21 @@ async function tmdbCollection(collectionId, apiKey, genreMap) {
   return { name: data.name || 'Collection', parts: (data.parts || []).map(p => normalizeTmdbItem(p, 'Movie', genreMap)) };
 }
 
-// Top cast + directors of one title
+// Top cast + directors of one title (cached per title for the session)
 async function tmdbCredits(tmdbId, type, apiKey) {
-  const kind = type === 'Series' ? 'tv' : 'movie';
-  const data = await tmdbFetch(`/${kind}/${tmdbId}/credits?language=en-US`, apiKey);
-  return {
-    cast: (data.cast || []).slice(0, 5).map(c => ({ id: c.id, name: c.name })),
-    directors: (data.crew || []).filter(c => c.job === 'Director').map(c => ({ id: c.id, name: c.name }))
-  };
+  const key = `${type}-${tmdbId}`;
+  let pending = creditsCache.get(key);
+  if (!pending) {
+    const kind = type === 'Series' ? 'tv' : 'movie';
+    pending = tmdbFetch(`/${kind}/${tmdbId}/credits?language=en-US`, apiKey)
+      .then(data => ({
+        cast: (data.cast || []).slice(0, 5).map(c => ({ id: c.id, name: c.name })),
+        directors: (data.crew || []).filter(c => c.job === 'Director').map(c => ({ id: c.id, name: c.name }))
+      }))
+      .catch(e => { creditsCache.delete(key); throw e; });
+    creditsCache.set(key, pending);
+  }
+  return pending;
 }
 
 // All movie/tv works of a person (combined credits, deduped)
@@ -364,7 +390,14 @@ async function getPeopleAppearances(items, type, apiKey) {
     if (!tmdbId) return;
     try {
       if (isSeries) {
-        const data = await tmdbFetch(`/tv/${tmdbId}/aggregate_credits?language=en-US`, apiKey);
+        const key = `agg-${tmdbId}`;
+        let pending = creditsCache.get(key);
+        if (!pending) {
+          pending = tmdbFetch(`/tv/${tmdbId}/aggregate_credits?language=en-US`, apiKey)
+            .catch(e => { creditsCache.delete(key); throw e; });
+          creditsCache.set(key, pending);
+        }
+        const data = await pending;
         for (const c of data.cast || []) bump({ id: c.id, name: c.name }, 'actor', c.total_episode_count || 1);
         for (const c of data.crew || []) {
           const jobs = (c.jobs || []).map(j => j.job);
