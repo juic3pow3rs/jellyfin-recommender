@@ -220,7 +220,8 @@ through the throttled `tmdbFetch` (≤ `TMDB_MAX_REQ_PER_SEC = 40` req/s, 429 �
   works, filtered to the type and against the library, noted "with/by <name> · released/releases <date>",
   ranked by rating/popularity (12 cards each).
 - **Upcoming** (`getUpcomingReleases` + `groupUpcomingBySource`): missing seasons/sequels of the type + works
-  of the favorite actors/directors, filtered to future `ReleaseDate`, sorted by date (max 24). Every card
+  of the favorite actors/directors, filtered to future `ReleaseDate` **or no date yet** ("No date yet" =
+  announced/in production, still upcoming), sorted by date with undated entries last (max 24). Every card
   carries `source` (`seasons` / `collections` / `actors` / `directors`) and the page renders one grid per
   source with a heading ("Upcoming seasons of your shows", "Upcoming sequels / collection parts",
   "Upcoming from your favorite actors/directors").

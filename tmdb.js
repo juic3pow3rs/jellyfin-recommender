@@ -471,7 +471,8 @@ async function getUpcomingReleases({ items, watchedItems, libraryItems, ownedSea
   const peopleGroups = await getFavoritePeopleWorks({ items, libraryItems, type, apiKey, minAppearances: 1 });
   cards = cards.concat(peopleGroups.flatMap(g => g.items));
   return cards
-    .filter(c => c.ReleaseDate && c.ReleaseDate > today)
-    .sort((a, b) => a.ReleaseDate.localeCompare(b.ReleaseDate))
+    // future-dated OR no date yet ("No date yet" = announced/in production, still upcoming) — past dates excluded
+    .filter(c => !c.ReleaseDate || c.ReleaseDate > today)
+    .sort((a, b) => (a.ReleaseDate || '9999-12-31').localeCompare(b.ReleaseDate || '9999-12-31')) // undated last
     .slice(0, 24);
 }
