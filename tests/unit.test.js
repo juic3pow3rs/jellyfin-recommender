@@ -25,7 +25,7 @@ test('index.html loads the vendored copies, not the live sites of the other repo
 test('index.html has the filter toggles and the external-recommendation controls', () => {
   const html = read('index.html');
   assert.match(html, /id="filter-bar"/);
-  for (const v of ['data-type="Movie"', 'data-type="Series"', 'data-scope="watched"', 'data-scope="all"', 'data-source="library"', 'data-source="new"', 'id="tmdbApiKey"', 'id="new-content-container"', 'id="shuffleBtn"', 'id="upcoming-container"', 'data-page="recommendations"', 'data-page="completeness"', 'data-page="people"', 'data-page="upcoming"', 'id="page-completeness"', 'id="page-people"', 'id="page-upcoming"', 'id="completeness-container"', 'id="people-container"', 'id="peopleMinSlider"', 'id="peopleMinValue"', 'id="yearFromSlider"', 'id="yearToSlider"', 'id="yearFromValue"', 'id="yearToValue"'])
+  for (const v of ['data-type="Movie"', 'data-type="Series"', 'data-scope="watched"', 'data-scope="all"', 'data-source="library"', 'data-source="new"', 'id="tmdbApiKey"', 'id="new-content-container"', 'id="shuffleBtn"', 'id="upcoming-container"', 'data-page="recommendations"', 'data-page="completeness"', 'data-page="people"', 'data-page="upcoming"', 'id="page-completeness"', 'id="page-people"', 'id="page-upcoming"', 'id="completeness-container"', 'id="people-container"', 'id="peopleMinSlider"', 'id="peopleMinValue"', 'id="yearFromSlider"', 'id="yearToSlider"', 'id="yearFromValue"', 'id="yearToValue"', 'id="yearDualRange"', 'id="yearRangeFill"'])
     assert.ok(html.includes(v), v);
   assert.match(html, /src="tmdb\.js"/);
   // Required by the TMDB API terms of use (attribution)
@@ -56,6 +56,7 @@ test('pages: hidden pages really hide (incl. #recommendations-container) and sub
   // #recommendations-container { display:flex } has ID specificity and would override .page[hidden] — the
   // ID-qualified rule must exist so main (with the filter bar) is hidden on the other pages
   assert.ok(/#recommendations-container\[hidden\]\s*\{[^}]*display:\s*none/.test(css), 'missing #recommendations-container[hidden] { display:none }');
+  assert.ok(css.includes('.dual-range') && css.includes('.dual-range-fill'), 'dual-thumb year slider styles missing');
   const sub = css.match(/\.upcoming-subheading\s*\{[^}]*\}/)[0];
   assert.ok(!/margin[^;]*-/.test(sub), 'subheading must not have a negative margin (grid overlapped the title)');
 });

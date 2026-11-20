@@ -94,8 +94,10 @@ Filter toggles (`#filter-bar`, visible after login, persisted in `localStorage` 
 - **Scope** — `watched` (default): played items as anchors, unplayed as candidates; `all`: the whole library as
   both anchors and candidates (`findSimilar(…, includePlayed = true)` keeps already watched candidates, and the
   section titles become "Similar to …" / "Based on Your Whole Library").
-- **Years From/To** — two sliders (1900 … current year + 5, persisted as `recommender.yearFrom`/`recommender.yearTo`,
-  default full range = no filtering), only on the Recommendations page. Applied to the **candidates** only (never
+- **Years** — ONE dual-thumb slider (`#yearDualRange`: two stacked range inputs `#yearFromSlider`/`#yearToSlider`
+  with a filled track `#yearRangeFill`, 1900 … current year + 5, persisted as `recommender.yearFrom`/`recommender.yearTo`,
+  default full range = no filtering), only on the Recommendations page. Labels `#yearFromValue`/`#yearToValue` update
+  live on `input`; thumbs clamp so From ≤ To; recompute happens on `change`. Applied to the **candidates** only (never
   to the anchors/base): in-library candidates are filtered in `getScopeLists` via `yearInRange` (items without a
   year are kept); external TMDB candidates are filtered in `getExternalRecommendations` via the `yearRange` option.
 - **Source** — `library` (default) / `new`: on the Recommendations page, `library` shows the in-library
