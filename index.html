@@ -78,11 +78,13 @@
       </div>
       <div class="toggle-group year-range-group" data-group="recommendations">
         <span class="toggle-label" id="yearRangeLabel">Years:</span>
-        <input type="range" id="yearFromSlider" aria-labelledby="yearRangeLabel" title="From year">
-        <span class="toggle-label" id="yearFromValue">1900</span>
-        <span class="toggle-label">–</span>
-        <input type="range" id="yearToSlider" aria-label="To year" title="To year">
-        <span class="toggle-label" id="yearToValue">2030</span>
+        <div class="dual-range" id="yearDualRange">
+          <div class="dual-range-track"></div>
+          <div class="dual-range-fill" id="yearRangeFill"></div>
+          <input type="range" id="yearFromSlider" aria-label="From year" title="From year">
+          <input type="range" id="yearToSlider" aria-label="To year" title="To year">
+        </div>
+        <span class="toggle-label year-range-values"><span id="yearFromValue">1900</span>–<span id="yearToValue">2030</span></span>
       </div>
       <div class="toggle-group people-slider-group" data-group="people">
         <label class="toggle-label" for="peopleMinSlider">Min. appearances:</label>

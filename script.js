@@ -843,9 +843,20 @@ if (yearFromSlider && yearToSlider) {
   yearToSlider.min = String(YEAR_MIN);
   yearFromSlider.value = String(filterState.yearFrom);
   yearToSlider.value = String(filterState.yearTo);
+  const yearRangeFill = document.getElementById('yearRangeFill');
+  const updateYearFill = () => {
+    if (!yearRangeFill) return;
+    const span = YEAR_MAX - YEAR_MIN;
+    const pct = v => ((clampYear(v) - YEAR_MIN) / span) * 100;
+    yearRangeFill.style.left = pct(yearFromSlider.value) + '%';
+    yearRangeFill.style.width = Math.max(0, pct(yearToSlider.value) - pct(yearFromSlider.value)) + '%';
+    // keep the From thumb grabbable when both sit at the far right
+    yearFromSlider.style.zIndex = (+yearFromSlider.value >= YEAR_MAX - (span / 10)) ? 5 : 3;
+  };
   const syncYearLabels = () => {
     if (yearFromValue) yearFromValue.textContent = yearFromSlider.value;
     if (yearToValue) yearToValue.textContent = yearToSlider.value;
+    updateYearFill();
   };
   syncYearLabels();
   yearFromSlider.addEventListener('input', () => {
