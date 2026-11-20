@@ -186,7 +186,14 @@ function rankExternalCandidates(anchor, candidates, rarityProfile, limit = 6) {
 
 // anchors: library items to base on (already type-filtered); libraryItems: the whole library of that type,
 // used to exclude items the user already has. Returns { groups, stats } — stats say why groups can be empty
-async function getExternalRecommendations(anchors, libraryItems, type, apiKey, { anchorCount = 3, perAnchor = 6 } = {}) {
+// Year-range filter (Recommendations page sliders). Items without a year are kept.
+function yearInRange(item, from, to) {
+  const y = item?.ProductionYear;
+  if (!y) return true;
+  return y >= from && y <= to;
+}
+
+async function getExternalRecommendations(anchors, libraryItems, type, apiKey, { anchorCount = 3, perAnchor = 6, yearRange = null } = {}) {
   const stats = { anchors: 0, anchorsWithId: 0, fetched: 0, excluded: 0, groups: 0 };
   if (!apiKey || !anchors?.length) return { groups: [], stats };
   const genreMap = await tmdbGenreMap(type, apiKey);
@@ -202,7 +209,7 @@ async function getExternalRecommendations(anchors, libraryItems, type, apiKey, {
     if (tmdbId) stats.anchorsWithId++;
     const raw = await fetchTmdbSimilarForAnchor(anchor, tmdbId, type, apiKey, genreMap);
     stats.fetched += raw.length;
-    const fresh = raw.filter(c => !isInLibrary(c, libraryIds, titleIndex) && !usedIds.has(c.TmdbId));
+    const fresh = raw.filter(c => (!yearRange || yearInRange(c, yearRange.from, yearRange.to)) && !isInLibrary(c, libraryIds, titleIndex) && !usedIds.has(c.TmdbId));
     stats.excluded += raw.length - fresh.length;
     const recommendations = rankExternalCandidates(anchor, fresh, rarityProfile, perAnchor);
     if (!recommendations.length) return null;

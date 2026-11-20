@@ -231,9 +231,9 @@ body {
   box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.3);
 }
 
-/* Min-appearances slider (Actors & directors page) */
-.people-slider-group input[type="range"] {
-  width: 120px;
+/* Range sliders (Min. appearances on Actors & directors, From/To years on Recommendations) */
+.toggle-group input[type="range"] {
+  width: 110px;
   accent-color: var(--primary);
   cursor: pointer;
 }

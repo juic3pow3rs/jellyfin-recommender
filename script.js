@@ -39,6 +39,13 @@ if (!['library', 'new'].includes(filterState.source)) filterState.source = 'libr
 // Min. appearances slider on the Actors & directors page (1-10)
 const clampPeopleMin = v => Math.min(10, Math.max(1, parseInt(v) || 1));
 filterState.peopleMin = clampPeopleMin(localStorage.getItem('recommender.peopleMin') ?? 2);
+// Year-range filter on the Recommendations page (From/To sliders); default = full range (no filtering)
+const YEAR_MIN = 1900;
+const YEAR_MAX = new Date().getFullYear() + 5; // allow a few years of upcoming releases
+const clampYear = v => Math.min(YEAR_MAX, Math.max(YEAR_MIN, parseInt(v) || YEAR_MIN));
+filterState.yearFrom = clampYear(localStorage.getItem('recommender.yearFrom') ?? YEAR_MIN);
+filterState.yearTo = clampYear(localStorage.getItem('recommender.yearTo') ?? YEAR_MAX);
+if (filterState.yearFrom > filterState.yearTo) [filterState.yearFrom, filterState.yearTo] = [filterState.yearTo, filterState.yearFrom];
 if (tmdbKeyInput) tmdbKeyInput.value = localStorage.getItem('tmdbApiKey') || '';
 
 // --- Pages (views): recommendations / completeness / people / upcoming ---
@@ -467,19 +474,22 @@ const getAll = async Library => {
 // "watched" = played items as anchors, unplayed as candidates (never re-recommends what was watched);
 // "all" = the whole library as both anchors and candidates
 const getScopeLists = async () => {
+  // The year-range filter applies to the CANDIDATES (what may be recommended), never to the anchors/base
+  // (what your taste is built from). Items without a year are kept.
+  const byYear = items => (items || []).filter(i => yearInRange(i, filterState.yearFrom, filterState.yearTo));
   if (filterState.scope === 'all') {
     window.allItems ??= await getAll();
     window.Played = window.allItems;
     window.Unplayed = window.allItems;
     window.watched = window.allItems;
-    window.unwatched = window.allItems;
-    return { base: window.allItems, candidates: window.allItems, includePlayed: true };
+    window.unwatched = byYear(window.allItems);
+    return { base: window.allItems, candidates: window.unwatched, includePlayed: true };
   }
   window.Played ??= await getPlayed();
   window.Unplayed ??= await getUnplayed();
   window.watched = window.Played;
-  window.unwatched = window.Unplayed;
-  return { base: window.Played, candidates: window.Unplayed, includePlayed: false };
+  window.unwatched = byYear(window.Unplayed);
+  return { base: window.Played, candidates: window.unwatched, includePlayed: false };
 };
 
 // Main function to get suggestions using findSimilar
@@ -736,7 +746,8 @@ async function updateNewContent() {
     const libraryItems = await getAll(); // everything of this type, to exclude what the user already has
     const { groups, stats } = await getExternalRecommendations(base, libraryItems, filterState.type, apiKey, {
       anchorCount: NEW_CONTENT_ANCHORS,
-      perAnchor: similarsToShow
+      perAnchor: similarsToShow,
+      yearRange: { from: filterState.yearFrom, to: filterState.yearTo }
     });
     console.info('[tmdb] anchors:', stats.anchors, '| with TMDB id:', stats.anchorsWithId, '| fetched:', stats.fetched, '| already in library:', stats.excluded, '| groups:', stats.groups);
     pageTitle(newContentContainer, 'New to your library (not in Jellyfin yet)');
@@ -818,6 +829,42 @@ if (peopleMinSlider) {
     localStorage.setItem('recommender.peopleMin', String(filterState.peopleMin));
     if (window.jellyfin?.isAuthenticated) refreshRecommendations();
   });
+}
+
+// Year-range filter (Recommendations page): two sliders, From/To, clamped so From <= To
+const yearFromSlider = document.getElementById('yearFromSlider');
+const yearToSlider = document.getElementById('yearToSlider');
+const yearFromValue = document.getElementById('yearFromValue');
+const yearToValue = document.getElementById('yearToValue');
+if (yearFromSlider && yearToSlider) {
+  yearFromSlider.max = String(YEAR_MAX);
+  yearToSlider.max = String(YEAR_MAX);
+  yearFromSlider.min = String(YEAR_MIN);
+  yearToSlider.min = String(YEAR_MIN);
+  yearFromSlider.value = String(filterState.yearFrom);
+  yearToSlider.value = String(filterState.yearTo);
+  const syncYearLabels = () => {
+    if (yearFromValue) yearFromValue.textContent = yearFromSlider.value;
+    if (yearToValue) yearToValue.textContent = yearToSlider.value;
+  };
+  syncYearLabels();
+  yearFromSlider.addEventListener('input', () => {
+    if (+yearFromSlider.value > +yearToSlider.value) yearToSlider.value = yearFromSlider.value; // keep From <= To
+    syncYearLabels();
+  });
+  yearToSlider.addEventListener('input', () => {
+    if (+yearToSlider.value < +yearFromSlider.value) yearFromSlider.value = yearToSlider.value;
+    syncYearLabels();
+  });
+  const persistYearRange = () => {
+    filterState.yearFrom = clampYear(yearFromSlider.value);
+    filterState.yearTo = clampYear(yearToSlider.value);
+    localStorage.setItem('recommender.yearFrom', String(filterState.yearFrom));
+    localStorage.setItem('recommender.yearTo', String(filterState.yearTo));
+    if (window.jellyfin?.isAuthenticated) refreshRecommendations();
+  };
+  yearFromSlider.addEventListener('change', persistYearRange);
+  yearToSlider.addEventListener('change', persistYearRange);
 }
 
 // --- Page 4: upcoming releases feed — future-dated items only, whole library of the selected type ---
