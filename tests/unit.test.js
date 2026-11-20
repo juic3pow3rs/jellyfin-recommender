@@ -25,7 +25,7 @@ test('index.html loads the vendored copies, not the live sites of the other repo
 test('index.html has the filter toggles and the external-recommendation controls', () => {
   const html = read('index.html');
   assert.match(html, /id="filter-bar"/);
-  for (const v of ['data-type="Movie"', 'data-type="Series"', 'data-scope="watched"', 'data-scope="all"', 'data-source="library"', 'data-source="new"', 'id="tmdbApiKey"', 'id="new-content-container"', 'id="shuffleBtn"', 'id="upcoming-container"', 'data-page="recommendations"', 'data-page="completeness"', 'data-page="people"', 'data-page="upcoming"', 'id="page-completeness"', 'id="page-people"', 'id="page-upcoming"', 'id="completeness-container"', 'id="people-container"', 'id="peopleMinSlider"', 'id="peopleMinValue"'])
+  for (const v of ['data-type="Movie"', 'data-type="Series"', 'data-scope="watched"', 'data-scope="all"', 'data-source="library"', 'data-source="new"', 'id="tmdbApiKey"', 'id="new-content-container"', 'id="shuffleBtn"', 'id="upcoming-container"', 'data-page="recommendations"', 'data-page="completeness"', 'data-page="people"', 'data-page="upcoming"', 'id="page-completeness"', 'id="page-people"', 'id="page-upcoming"', 'id="completeness-container"', 'id="people-container"', 'id="peopleMinSlider"', 'id="peopleMinValue"', 'id="yearFromSlider"', 'id="yearToSlider"', 'id="yearFromValue"', 'id="yearToValue"'])
     assert.ok(html.includes(v), v);
   assert.match(html, /src="tmdb\.js"/);
   // Required by the TMDB API terms of use (attribution)
@@ -348,6 +348,38 @@ test('tmdb.js: getUpcomingReleases returns only future-dated items, sorted by da
   const groups = group(cards);
   assert.equal(JSON.stringify(groups.map(g => g.source)), JSON.stringify(['collections', 'directors']));
   assert.ok(groups.every(g => g.heading.length > 0 && g.items.length > 0));
+});
+
+test('tmdb.js: yearInRange keeps unknown years and enforces the bounds', async () => {
+  const ctx = loadTmdb(async () => ({ ok: true, json: async () => ({}) }));
+  const yearInRange = vm.runInContext('yearInRange', ctx);
+  assert.ok(yearInRange({ ProductionYear: 2010 }, 2000, 2020));
+  assert.ok(!yearInRange({ ProductionYear: 1999 }, 2000, 2020));
+  assert.ok(!yearInRange({ ProductionYear: 2021 }, 2000, 2020));
+  assert.ok(yearInRange({}, 2000, 2020), 'no year -> kept');
+  assert.ok(yearInRange({ ProductionYear: 2000 }, 2000, 2020) && yearInRange({ ProductionYear: 2020 }, 2000, 2020), 'bounds inclusive');
+});
+
+test('tmdb.js: getExternalRecommendations applies the yearRange to candidates', async () => {
+  const genreList = { genres: [{ id: 28, name: 'Action' }] };
+  const similar = { results: [
+    { id: 2, title: 'Fresh Pick', genre_ids: [28], vote_average: 8.5, release_date: '2011-01-01', poster_path: '/b.jpg' },
+    { id: 4, title: 'Future Pick', genre_ids: [28], vote_average: 8.0, release_date: '2027-05-05', poster_path: '/c.jpg' }
+  ] };
+  const fetchMock = async (url) => ({ ok: true, json: async () => (url.includes('/genre/') ? genreList : similar) });
+  const ctx = loadTmdb(fetchMock);
+  const getExt = vm.runInContext('getExternalRecommendations', ctx);
+  const anchor = { Id: 'a1', Name: 'Anchor', Type: 'Movie', Genres: ['Action'], ProductionYear: 2010, CommunityRating: 8.5, ProviderIds: { Tmdb: '100' } };
+  const library = [anchor];
+
+  const all = await getExt([anchor], library, 'Movie', 'KEY', { anchorCount: 1, perAnchor: 5 });
+  assert.equal(JSON.stringify(all.groups[0].Recommendations.map(r => r.TmdbId).sort()), JSON.stringify(['2', '4']));
+
+  const ranged = await getExt([anchor], library, 'Movie', 'KEY', { anchorCount: 1, perAnchor: 5, yearRange: { from: 2020, to: 2030 } });
+  assert.equal(JSON.stringify(ranged.groups[0].Recommendations.map(r => r.TmdbId)), JSON.stringify(['4']), 'only the in-range year survives');
+
+  const none = await getExt([anchor], library, 'Movie', 'KEY', { anchorCount: 1, perAnchor: 5, yearRange: { from: 1990, to: 1999 } });
+  assert.equal(none.groups.length, 0, 'range excluding everything -> no groups');
 });
 
 test('tmdb.js: anchors without a Tmdb provider id are resolved through a TMDB title search', async () => {

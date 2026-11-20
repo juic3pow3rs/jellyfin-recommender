@@ -71,7 +71,7 @@ InitializeJellyfin(explicitLogin)                  explicitLogin = Connect butto
 
 | Page | Container | Content | Toggles shown |
 |---|---|---|---|
-| `recommendations` | `#recommendations-container` | source `library`: taste section + "Because you watched" groups; source `new`: "New to your library" groups (TMDB) | Type, Base (scope), Source, TMDB key, Shuffle |
+| `recommendations` | `#recommendations-container` | source `library`: taste section + "Because you watched" groups; source `new`: "New to your library" groups (TMDB) | Type, Base (scope), Source, Years From/To, TMDB key, Shuffle |
 | `completeness` | `#completeness-container` | Shows: missing/upcoming seasons; Movies: missing collection parts | Type, TMDB key |
 | `people` | `#people-container` | One section per actor/director (their other works), random pick above the slider threshold | Type, TMDB key, Min. appearances slider, Shuffle |
 | `upcoming` | `#upcoming-container` | Future-dated releases feed | Type, TMDB key |
@@ -94,6 +94,10 @@ Filter toggles (`#filter-bar`, visible after login, persisted in `localStorage` 
 - **Scope** — `watched` (default): played items as anchors, unplayed as candidates; `all`: the whole library as
   both anchors and candidates (`findSimilar(…, includePlayed = true)` keeps already watched candidates, and the
   section titles become "Similar to …" / "Based on Your Whole Library").
+- **Years From/To** — two sliders (1900 … current year + 5, persisted as `recommender.yearFrom`/`recommender.yearTo`,
+  default full range = no filtering), only on the Recommendations page. Applied to the **candidates** only (never
+  to the anchors/base): in-library candidates are filtered in `getScopeLists` via `yearInRange` (items without a
+  year are kept); external TMDB candidates are filtered in `getExternalRecommendations` via the `yearRange` option.
 - **Source** — `library` (default) / `new`: on the Recommendations page, `library` shows the in-library
   taste + "Because you watched" sections; `new` shows `#new-content-container` with TMDB recommendations
   **outside** the library (§5b). (Migrated from the old `recommender.newContent` on/off key.)
