@@ -241,7 +241,8 @@ const upcomingMocks = () => {
   const collection = { name: 'Anchor Collection', parts: [
     { id: 100, title: 'Anchor', release_date: '2010-01-01', vote_average: 8, popularity: 90, genre_ids: [28], poster_path: '/a.jpg' },
     { id: 101, title: 'Anchor Part 2', release_date: '2011-01-01', vote_average: 7.5, popularity: 60, genre_ids: [28] },
-    { id: 102, title: 'Anchor Part 3', release_date: '2099-06-01', vote_average: 0, popularity: 10, genre_ids: [28] }
+    { id: 102, title: 'Anchor Part 3', release_date: '2099-06-01', vote_average: 0, popularity: 10, genre_ids: [28] },
+    { id: 103, title: 'Anchor Part 4', vote_average: 0, popularity: 5, genre_ids: [28] } // no release_date -> "No date yet"
   ] };
   const credits = { cast: [{ id: 55, name: 'Star Actor' }], crew: [{ id: 66, name: 'Top Director', job: 'Director' }] };
   const person55 = { cast: [{ id: 201, media_type: 'movie', title: 'Actor Movie', release_date: '2015-01-01', vote_average: 8, popularity: 50, genre_ids: [28], poster_path: '/p.jpg' }], crew: [] };
@@ -325,9 +326,10 @@ test('tmdb.js: getMissingSequels dedupes the collection request and the parts ac
   const m3 = { Id: 'm3', Name: 'Anchor Part 3', Type: 'Movie', ProviderIds: { Tmdb: '102' } }; // owns part 3 -> parts 1+2 missing
   const cards = await getSeq([m1, m3], [m1, m3], 'KEY');
   assert.equal(collectionCalls, 1, 'one collection request for two movies of the same collection');
-  assert.equal(cards.length, 1, 'only the missing part remains, emitted once');
-  assert.equal(cards[0].TmdbId, '101');
-  assert.equal(cards[0].source, 'collections');
+  assert.equal(cards.length, 2, 'the two missing parts (101, 103), each emitted once');
+  assert.equal(JSON.stringify(cards.map(c => c.TmdbId).sort()), JSON.stringify(['101', '103']));
+  assert.ok(cards.every(c => c.source === 'collections'));
+  assert.ok(cards.find(c => c.TmdbId === '103').note === 'No date yet');
 });
 
 test('tmdb.js: getUpcomingReleases returns only future-dated items, sorted by date', async () => {
@@ -338,9 +340,11 @@ test('tmdb.js: getUpcomingReleases returns only future-dated items, sorted by da
   const cards = await getUpcoming({ items: [movie], watchedItems: [movie], libraryItems: [movie, series], ownedSeasons: new Map([['s1', new Set([1, 2])]]), type: 'Movie', apiKey: 'KEY' });
   const names = cards.map(c => c.Name).join(' | ');
   assert.ok(names.includes('Anchor Part 3') && names.includes('Director Movie'), names);
+  assert.ok(names.includes('Anchor Part 4'), 'undated ("No date yet") entries count as upcoming');
   assert.ok(!names.includes('Actor Movie') && !names.includes('Anchor Part 2'), 'past-dated items excluded');
-  const dates = cards.map(c => c.ReleaseDate);
-  assert.equal(JSON.stringify(dates), JSON.stringify([...dates].sort()), 'sorted by release date');
+  const dates = cards.map(c => c.ReleaseDate || '9999-12-31');
+  assert.equal(JSON.stringify(dates), JSON.stringify([...dates].sort()), 'sorted by release date, undated last');
+  assert.ok(!cards[cards.length - 1].ReleaseDate, 'the undated entry is last');
   // every card is tagged with where it comes from, and groupUpcomingBySource groups in a stable order
   assert.ok(cards.find(c => c.Name.includes('Anchor Part 3')).source === 'collections');
   assert.ok(cards.find(c => c.Name === 'Director Movie').source === 'directors');
